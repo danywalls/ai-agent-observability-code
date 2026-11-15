@@ -1,0 +1,13 @@
+{
+  "name": "ai-agent-observability-code",
+  "version": "1.0.0",
+  "description": "TypeScript Companion Code for AI Agent Observability by Dany Paredes (Firebase Genkit, LangChain, LangSmith, OpenTelemetry, Progress Observability Platform)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck:genkit": "npm --prefix genkit run typecheck",
+    "typecheck:langchain": "npm --prefix langchain run typecheck",
+    "typecheck:otel": "npm --prefix otel run typecheck",
+    "typecheck": "npm run typecheck:genkit && npm run typecheck:langchain && npm run typecheck:otel"
+  }
+}

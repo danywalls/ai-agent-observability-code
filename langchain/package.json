@@ -1,0 +1,41 @@
+{
+  "name": "ai-agent-observability-langchain",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "ch02": "tsx src/ch02-react-loop-agent.ts",
+    "ch03": "tsx src/ch03-logs-vs-traces.ts",
+    "ch04": "tsx src/ch04-tokens-cost-latency.ts",
+    "ch06": "tsx src/ch06-langsmith-first-trace.ts",
+    "ch07": "tsx src/ch07-trace-anatomy-and-threads.ts",
+    "ch10": "tsx src/ch10-datasets-langsmith.ts",
+    "ch11": "tsx src/ch11-evaluators-langsmith.ts",
+    "ch12": "tsx src/ch12-experiments-and-cicd.ts",
+    "ch13": "tsx src/ch13-trajectory-evaluators-langsmith.ts",
+    "ch14": "tsx src/ch14-feedback-and-annotation-queues.ts",
+    "ch15": "tsx src/ch15-filtering-production-traces.ts",
+    "ch16": "tsx src/ch16-online-eval-and-automations.ts",
+    "ch18": "tsx src/ch18-privacy-pii-and-hitl.ts",
+    "ch20": "tsx src/ch20-observable-agent-from-day-one.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@langchain/core": "^1.4.1",
+    "@langchain/google-genai": "^2.3.6",
+    "@langchain/openai": "^1.8.4",
+    "langchain": "^1.6.6",
+    "langsmith": "^0.12.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

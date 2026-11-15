@@ -1,0 +1,27 @@
+{
+  "name": "ai-agent-observability-otel",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "ch08": "tsx src/ch08-otel-genai-conventions.ts",
+    "ch09": "tsx src/ch09-three-lenses-comparison.ts",
+    "ch19": "tsx src/ch19-production-architecture-blueprint.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.301.2",
+    "@opentelemetry/sdk-node": "^0.301.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
