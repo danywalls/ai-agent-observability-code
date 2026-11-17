@@ -149,7 +149,7 @@ async function main() {
   const prodOtel = createProductionOtelSdk({
     serviceName: 'store-support-agent-ts',
     environment: 'production',
-    collectorUrl: 'https://otel-collector.progress-observability.internal:4318',
+    collectorUrl: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318',
     progressApiKey: 'prog_live_demo_key',
     captureMessageContent: false, // Privacy by default in production
   });

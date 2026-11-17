@@ -19,7 +19,7 @@ import { googleAI } from '@genkit-ai/google-genai';
 
 const ai = genkit({
   plugins: [googleAI()],
-  model: googleAI.model('gemini-2.5-flash'),
+  model: googleAI.model('gemini-3-flash-preview'),
 });
 
 // Fake database

@@ -9,20 +9,20 @@ import { setCustomMetadataAttributes } from 'genkit/tracing';
  * Compare this file with Chapter 1 (`ch01-support-agent.ts`).
  * Includes from Day 1:
  * 1. Typed `defineFlow` and `defineTool` with strict Zod input/output schemas.
- * 2. Custom sub-spans via `ai.run()` for internal business logic visibility.
- * 3. Custom business attributes via `setCustomMetadataAttributes()` for Genkit Monitoring.
- * 4. Explicit `maxTurns: 5` cap to prevent runaway ReAct loops.
- * 5. Built-in `defineEvaluator` for immediate trajectory & policy regression testing.
+ * 2. Real ReAct agent loop via `ai.generate({ tools, maxTurns: 5 })`.
+ * 3. Custom sub-spans via `ai.run()` for internal business logic & usage metrics.
+ * 4. Custom business attributes via `setCustomMetadataAttributes()` for Genkit Monitoring.
  */
 
 const ai = genkit({
   plugins: [googleAI()],
+  model: googleAI.model('gemini-3-flash-preview'),
 });
 
 export const getOrderStatusTool = ai.defineTool(
   {
     name: 'getOrderStatus',
-    description: 'Fetch lean order status, daysSinceDelivery, and totalUsd by orderId.',
+    description: 'Fetch lean order status, daysSinceDelivery, and totalUsd by orderId (format A-XXXX).',
     inputSchema: z.object({
       orderId: z.string().describe('Order identifier matching A-XXXX'),
     }),
@@ -37,7 +37,38 @@ export const getOrderStatusTool = ai.defineTool(
     if (orderId === 'A-1002') {
       return { orderId, status: 'delivered' as const, daysSinceDelivery: 45, totalUsd: 120.0 };
     }
+    if (orderId === 'A-1003') {
+      return { orderId, status: 'delivered' as const, daysSinceDelivery: 12, totalUsd: 15.5 };
+    }
     return { orderId, status: 'in_transit' as const, daysSinceDelivery: 0, totalUsd: 89.99 };
+  }
+);
+
+export const checkReturnPolicyTool = ai.defineTool(
+  {
+    name: 'checkReturnPolicy',
+    description: 'Check if a delivered order is eligible for a refund based on daysSinceDelivery and customerTier.',
+    inputSchema: z.object({
+      daysSinceDelivery: z.number().describe('Days elapsed since order delivery'),
+      customerTier: z.enum(['free', 'standard', 'vip']),
+    }),
+    outputSchema: z.object({
+      eligible: z.boolean(),
+      maxWindowDays: z.number(),
+    }),
+  },
+  async ({ daysSinceDelivery, customerTier }) => {
+    return ai.run(
+      'evaluate-return-window',
+      { daysSinceDelivery, customerTier },
+      async () => {
+        const maxWindowDays = customerTier === 'vip' ? 60 : 30;
+        return {
+          eligible: daysSinceDelivery <= maxWindowDays,
+          maxWindowDays,
+        };
+      }
+    );
   }
 );
 
@@ -48,7 +79,7 @@ export const observableSupportFlow = ai.defineFlow(
       threadId: z.string(),
       customerTier: z.enum(['free', 'standard', 'vip']),
       promptVersion: z.string(),
-      orderId: z.string(),
+      message: z.string(),
     }),
     outputSchema: z.object({
       answer: z.string(),
@@ -64,31 +95,36 @@ export const observableSupportFlow = ai.defineFlow(
       prompt_version: input.promptVersion,
     });
 
-    const trajectory: string[] = [];
+    // 2. Real ReAct loop bounded by maxTurns: 5 and structured output
+    const response = await ai.generate({
+      system:
+        `You are a concise customer support agent. Customer tier: ${input.customerTier}. ` +
+        'Always call getOrderStatus first, then checkReturnPolicy before answering refund questions.',
+      prompt: input.message,
+      tools: [getOrderStatusTool, checkReturnPolicyTool],
+      maxTurns: 5,
+      output: {
+        schema: z.object({
+          answer: z.string(),
+          eligibleForRefund: z.boolean(),
+        }),
+      },
+    });
 
-    // 2. Step-level sub-spans for full waterfall visibility in Genkit Dev UI (localhost:4000)
-    const order = await getOrderStatusTool({ orderId: input.orderId });
-    trajectory.push('getOrderStatus');
+    const trajectory = response.messages
+      .flatMap((m) => m.content)
+      .filter((part) => Boolean(part.toolRequest))
+      .map((part) => part.toolRequest!.name);
 
-    const policy = await ai.run(
-      'checkReturnPolicyStep',
-      { daysSinceDelivery: order.daysSinceDelivery },
-      async () => {
-        return {
-          eligible: order.daysSinceDelivery <= 30,
-          maxWindowDays: 30,
-        };
-      }
-    );
-    trajectory.push('checkReturnPolicyStep');
-
-    const answer = policy.eligible
-      ? `Order ${order.orderId} ($${order.totalUsd}) is within the 30-day window and eligible for a refund.`
-      : `Order ${order.orderId} was delivered ${order.daysSinceDelivery} days ago, which is outside our 30-day return window.`;
+    // 3. Record token usage in a dedicated sub-span
+    await ai.run('record-usage-metrics', { usage: response.usage }, async () => ({
+      inputTokens: response.usage?.inputTokens ?? 0,
+      outputTokens: response.usage?.outputTokens ?? 0,
+    }));
 
     return {
-      answer,
-      eligibleForRefund: policy.eligible,
+      answer: response.output?.answer ?? response.text,
+      eligibleForRefund: response.output?.eligibleForRefund ?? false,
       trajectory,
     };
   }
@@ -99,10 +135,10 @@ async function main() {
     threadId: 'thread_genkit_day1',
     customerTier: 'vip',
     promptVersion: 'v1.0-observable',
-    orderId: 'A-1002',
+    message: 'Can I return order A-1002?',
   });
 
-  console.log('=== Genkit Day-1 Observable Flow Output ===');
+  console.log('=== Genkit Day-1 Observable Agent Output ===');
   console.log(JSON.stringify(result, null, 2));
 }
 

@@ -7,7 +7,7 @@
  *   - `custom`:    ai.run('normalize-query', ...)
  *   - `retriever`: storePolicyRetriever (via ai.defineSimpleRetriever + ai.retrieve)
  *   - `prompt`:    supportPrompt (via ai.definePrompt)
- *   - `model`:     googleai/gemini-2.5-flash
+ *   - `model`:     googleai/gemini-3-flash-preview
  *   - `tool`:      getOrderStatus
  *   - `output`:    Structured output validated by Zod (CustomerReplySchema)
  *
@@ -20,7 +20,7 @@ import { googleAI } from '@genkit-ai/google-genai';
 
 const ai = genkit({
   plugins: [googleAI()],
-  model: googleAI.model('gemini-2.5-flash'),
+  model: googleAI.model('gemini-3-flash-preview'),
 });
 
 // 1. Retriever: creates a dedicated `retriever` span in the trace tree
@@ -109,7 +109,7 @@ export const supportPrompt = ai.definePrompt({
   system:
     'You are the customer support assistant of an online store. ' +
     'Base your policy answers strictly on the provided context documents and cite their IDs. ' +
-    'If the user mentions an order ID, call getOrderStatus first.',
+    'If the user mentions an order ID, call getOrderStatus once, then immediately answer using the tool result and policy documents.',
   messages: async (input) => [
     {
       role: 'user',

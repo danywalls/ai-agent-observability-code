@@ -1,23 +1,62 @@
 # AI Agent Observability - Companion TypeScript Code
 
-Official TypeScript companion repository for the book **AI Agent Observability** by **Dany Paredes** ([danywalls.com/book](https://danywalls.com/book)).
+Source files for the book **AI Agent Observability** by **Dany Paredes** ([danywalls.com/book](https://danywalls.com/book)).
 
-Every chapter example is self-contained, strictly typed in TypeScript, and includes deterministic local simulation fallbacks so you can run and study every trace, guardrail, and evaluation without paid API keys.
+Canonical repository: https://github.com/danywalls/ai-agent-observability-code
+
+> **Note on language:** All examples in this repository are written in **TypeScript** (`strict: true`), while the observability, tracing, evaluation, and privacy patterns apply equally to any other language (Python, Go, Java, or .NET).
+
+---
 
 ## Repository Structure
 
 ```text
 .
-├── genkit/        # Firebase Genkit flows, tools, RAG, evaluators & Genkit Monitoring (Ch. 1, 2, 3-5, 11-12, 17, 20)
-├── langchain/     # LangChain + LangSmith ReAct agents, middlewares, datasets & privacy (Ch. 2, 6-8, 11-16, 18, 20)
-├── otel/          # OpenTelemetry GenAI Semantic Conventions (gen_ai.*) & OTLP export (Ch. 9-10, 19)
-├── .env.example   # Optional environment variables for live LLM / LangSmith / OTLP runs
+├── genkit/        # Firebase Genkit flows, tools, RAG, evaluators & Genkit Monitoring
+├── langchain/     # LangChain + LangSmith ReAct agents, middlewares, datasets & privacy
+├── otel/          # OpenTelemetry GenAI Semantic Conventions (gen_ai.*) & OTLP export
+├── .env.example   # Environment variables for live LLM / LangSmith / OTLP runs
+├── LICENSE        # MIT License
 └── package.json   # Root workspace typecheck scripts
 ```
 
-## Quick Start
+*(Note: Inside the book manuscript, these three folders live under `code/genkit/`, `code/langchain/`, and `code/otel/`.)*
 
-1. **Install dependencies** in the package(s) you want to run:
+---
+
+## Source-Code Coverage
+
+Chapter 0 covers environment setup and the four-pillar map. All code examples begin in Chapter 1:
+
+| Chapter | Package & File(s) | API Key / Requirements | Run Command |
+| :--- | :--- | :--- | :--- |
+| **Ch. 01** | `genkit/src/ch01-support-agent.ts` | Requires `GEMINI_API_KEY` | `cd genkit && npx genkit start -- npx tsx --watch src/ch01-support-agent.ts` |
+| **Ch. 02** | `genkit/src/ch02-react-loop-agent.ts`, `langchain/src/ch02-react-loop-agent.ts` | Genkit: `GEMINI_API_KEY`; LangChain: Offline | `cd genkit && npm run ch02` / `cd langchain && npm run ch02` |
+| **Ch. 03** | `genkit/src/ch03-logs-vs-traces.ts`, `langchain/src/ch03-logs-vs-traces.ts` | Genkit: `GEMINI_API_KEY`; LangChain: `LANGSMITH_API_KEY` optional | `cd genkit && npm run ch03` / `cd langchain && npm run ch03` |
+| **Ch. 04** | `genkit/src/ch04-tokens-cost-latency.ts`, `langchain/src/ch04-tokens-cost-latency.ts` | Genkit: `GEMINI_API_KEY`; LangChain: Offline | `cd genkit && npm run ch04` / `cd langchain && npm run ch04` |
+| **Ch. 05** | `genkit/src/ch05-genkit-devtools-trace.ts` | Local simulation or `GEMINI_API_KEY` | `cd genkit && npm run ch05` |
+| **Ch. 06** | `langchain/src/ch06-langsmith-first-trace.ts` | Local simulation or `LANGSMITH_API_KEY` | `cd langchain && npm run ch06` |
+| **Ch. 07** | `langchain/src/ch07-trace-anatomy-and-threads.ts` | Offline or `LANGSMITH_API_KEY` optional | `cd langchain && npm run ch07` |
+| **Ch. 08** | `otel/src/ch08-otel-genai-conventions.ts` | Offline / OTLP optional | `cd otel && npm run ch08` |
+| **Ch. 09** | `otel/src/ch09-three-lenses-comparison.ts` | Offline | `cd otel && npm run ch09` |
+| **Ch. 10** | `genkit/src/ch10-golden-dataset.ts`, `langchain/src/ch10-datasets-langsmith.ts` | Genkit: Offline; LangChain: `LANGSMITH_API_KEY` optional | `cd genkit && npm run ch10` / `cd langchain && npm run ch10` |
+| **Ch. 11** | `genkit/src/ch11-evaluators-genkit.ts`, `langchain/src/ch11-evaluators-langsmith.ts` | Genkit: `GEMINI_API_KEY`; LangChain: Offline | `cd genkit && npm run ch11` / `cd langchain && npm run ch11` |
+| **Ch. 12** | `langchain/src/ch12-experiments-and-cicd.ts` | Offline or `LANGSMITH_API_KEY` optional | `cd langchain && npm run ch12` |
+| **Ch. 13** | `genkit/src/ch13-trajectory-evaluators-genkit.ts`, `langchain/src/ch13-trajectory-evaluators-langsmith.ts` | Offline | `cd genkit && npm run ch13` / `cd langchain && npm run ch13` |
+| **Ch. 14** | `langchain/src/ch14-feedback-and-annotation-queues.ts` | Local simulation or `LANGSMITH_API_KEY` | `cd langchain && npm run ch14` |
+| **Ch. 15** | `langchain/src/ch15-filtering-production-traces.ts` | Offline or `LANGSMITH_API_KEY` optional | `cd langchain && npm run ch15` |
+| **Ch. 16** | `langchain/src/ch16-online-eval-and-automations.ts` | Local simulation or `LANGSMITH_API_KEY` | `cd langchain && npm run ch16` |
+| **Ch. 17** | `genkit/src/ch17-genkit-monitoring-and-alerts.ts` | Offline | `cd genkit && npm run ch17` |
+| **Ch. 18** | `langchain/src/ch18-privacy-pii-and-hitl.ts` | Offline | `cd langchain && npm run ch18` |
+| **Ch. 19** | `otel/src/ch19-production-architecture-blueprint.ts` | Offline | `cd otel && npm run ch19` |
+| **Ch. 20** | `genkit/src/ch20-observable-agent-from-day-one.ts`, `langchain/src/ch20-observable-agent-from-day-one.ts` | Local simulation or live keys | `cd genkit && npm run ch20` / `cd langchain && npm run ch20` |
+
+---
+
+## Before You Run a Chapter
+
+- **Node.js 20+** and **npm** are required (`node -v`).
+- Install dependencies inside the package(s) you plan to run:
 
 ```bash
 cd genkit && npm install && cd ..
@@ -25,32 +64,19 @@ cd langchain && npm install && cd ..
 cd otel && npm install && cd ..
 ```
 
-2. **(Optional) Configure live API keys:**
-
-```bash
-cp .env.example .env
-```
-
-All examples work out of the box in **local simulation mode** when API keys are omitted.
-
-3. **Run TypeScript type-checking across all 3 packages:**
+- Copy `.env.example` into your local `.env` (or export variables in your shell) for chapters that call live models or cloud backends. **Never commit real API keys.**
+  - **Gemini API Key (free tier):** [Google AI Studio](https://aistudio.google.com/apikey)
+  - **LangSmith API Key (free developer tier):** [smith.langchain.com](https://smith.langchain.com)
+  - **Progress Agent Observability:** [progress.com](https://www.progress.com) / [telerik.com](https://www.telerik.com)
+- Verify TypeScript compilation across all three packages at any time:
 
 ```bash
 npm run typecheck
 ```
 
-4. **Run any chapter script** (for example):
+---
 
-```bash
-# Firebase Genkit (Chapters 1, 2, 3, 4, 5, 11, 12, 17, 20)
-cd genkit
-npm run ch03
+## Errata and Support
 
-# LangChain & LangSmith (Chapters 2, 6, 7, 8, 11-16, 18, 20)
-cd ../langchain
-npm run ch06
-
-# OpenTelemetry & OTLP / Progress Observability Platform (Chapters 9, 10, 19)
-cd ../otel
-npm run ch09
-```
+If you find a bug in any example or run into setup issues, please open an issue at:
+https://github.com/danywalls/ai-agent-observability-code/issues
