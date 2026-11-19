@@ -17,6 +17,13 @@
 import { genkit, z } from 'genkit';
 import { googleAI } from '@genkit-ai/google-genai';
 
+// Load local .env if present (Node 20.12+) without overriding exported shell variables
+try {
+  process.loadEnvFile?.();
+} catch {
+  // No .env file present; rely on exported environment variables
+}
+
 const ai = genkit({
   plugins: [googleAI()],
   model: googleAI.model('gemini-3-flash-preview'),
@@ -46,7 +53,9 @@ const getOrder = ai.defineTool(
   {
     name: 'getOrder',
     description: 'Returns the status, delivery/order date, item name and total of an order given its ID (format A-XXXX).',
-    inputSchema: z.object({ orderId: z.string() }),
+    inputSchema: z.object({
+      orderId: z.string().describe('Order ID in format A-XXXX'),
+    }),
     outputSchema: z.object({
       found: z.boolean(),
       status: z.string().optional(),
@@ -66,14 +75,20 @@ const searchFaq = ai.defineTool(
   {
     name: 'searchFaq',
     description: 'Searches the store FAQ and policies about returns, refunds, and shipping times.',
-    inputSchema: z.object({ query: z.string() }),
+    inputSchema: z.object({
+      query: z.string().describe('Topic or keyword to search in store policies'),
+    }),
     outputSchema: z.array(z.object({ topic: z.string(), content: z.string() })),
   },
   async ({ query }) => {
-    const q = query.toLowerCase();
-    return faqArticles.filter(
-      (a) => a.topic.includes(q) || a.content.toLowerCase().includes(q) || q.includes('refund') || q.includes('return'),
-    );
+    const terms = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 2);
+    return faqArticles.filter((a) => {
+      const haystack = `${a.topic} ${a.content}`.toLowerCase();
+      return terms.some((term) => haystack.includes(term));
+    });
   },
 );
 
@@ -84,8 +99,8 @@ const requestRefund = ai.defineTool(
     description:
       'Submits a refund for an order. Only call this AFTER verifying order status is "delivered" and checking the refund policy.',
     inputSchema: z.object({
-      orderId: z.string(),
-      reason: z.string(),
+      orderId: z.string().describe('Order ID in format A-XXXX'),
+      reason: z.string().describe('Short reason for the refund request'),
     }),
     outputSchema: z.object({
       refundId: z.string(),

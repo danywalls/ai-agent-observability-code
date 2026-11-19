@@ -14,6 +14,13 @@
 import { genkit, z } from 'genkit';
 import { googleAI } from '@genkit-ai/google-genai';
 
+// Load local .env if present (Node 20.12+) without overriding exported shell variables
+try {
+  process.loadEnvFile?.();
+} catch {
+  // No .env file present; rely on exported environment variables
+}
+
 const ai = genkit({
   plugins: [googleAI()],
   model: googleAI.model('gemini-3-flash-preview'),
