@@ -1,0 +1,31 @@
+name: Agent Evaluation Gate
+
+on:
+  pull_request:
+    paths:
+      - 'code/**'
+      - '.github/workflows/agent-eval.yml'
+
+concurrency:
+  group: agent-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install LangChain example dependencies
+        working-directory: code/langchain
+        run: npm ci
+
+      - name: Run typecheck and CI evaluation gate
+        working-directory: code/langchain
+        run: |
+          npm run typecheck
+          npm run ch12:gate

@@ -13,12 +13,15 @@
     "ch10": "tsx src/ch10-datasets-langsmith.ts",
     "ch11": "tsx src/ch11-evaluators-langsmith.ts",
     "ch12": "tsx src/ch12-experiments-and-cicd.ts",
+    "ch12:gate": "tsx src/ch12-eval-gate.ts",
     "ch13": "tsx src/ch13-trajectory-evaluators-langsmith.ts",
     "ch14": "tsx src/ch14-feedback-and-annotation-queues.ts",
     "ch15": "tsx src/ch15-filtering-production-traces.ts",
     "ch16": "tsx src/ch16-online-eval-and-automations.ts",
     "ch18": "tsx src/ch18-privacy-pii-and-hitl.ts",
-    "ch20": "tsx src/ch20-observable-agent-from-day-one.ts"
+    "ch20": "tsx src/ch20-observable-agent-from-day-one.ts",
+    "ch21": "tsx src/ch21-multi-agent-langsmith.ts",
+    "ch23": "tsx src/ch23-semantic-cache-guardrails.ts"
   },
   "keywords": [],
   "author": "",

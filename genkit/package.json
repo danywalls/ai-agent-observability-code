@@ -13,8 +13,11 @@
     "ch10": "tsx src/ch10-golden-dataset.ts",
     "ch11": "tsx src/ch11-evaluators-genkit.ts",
     "ch13": "tsx src/ch13-trajectory-evaluators-genkit.ts",
+    "ch13:sim": "tsx src/ch13-multi-turn-simulator.ts",
     "ch17": "tsx src/ch17-genkit-monitoring-and-alerts.ts",
-    "ch20": "tsx src/ch20-observable-agent-from-day-one.ts"
+    "ch20": "tsx src/ch20-observable-agent-from-day-one.ts",
+    "ch22": "tsx src/ch22-streaming-flow.ts",
+    "ch23": "tsx src/ch23-semantic-cache-guardrails.ts"
   },
   "keywords": [],
   "author": "",

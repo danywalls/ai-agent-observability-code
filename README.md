@@ -41,8 +41,8 @@ Chapter 0 covers environment setup and the four-pillar map. All code examples be
 | **Ch. 09** | `otel/src/ch09-three-lenses-comparison.ts` | Offline | `cd otel && npm run ch09` |
 | **Ch. 10** | `genkit/src/ch10-golden-dataset.ts`, `langchain/src/ch10-datasets-langsmith.ts` | Genkit: Offline; LangChain: `LANGSMITH_API_KEY` optional | `cd genkit && npm run ch10` / `cd langchain && npm run ch10` |
 | **Ch. 11** | `genkit/src/ch11-evaluators-genkit.ts`, `langchain/src/ch11-evaluators-langsmith.ts` | Genkit: `GEMINI_API_KEY`; LangChain: Offline | `cd genkit && npm run ch11` / `cd langchain && npm run ch11` |
-| **Ch. 12** | `langchain/src/ch12-experiments-and-cicd.ts` | Offline or `LANGSMITH_API_KEY` optional | `cd langchain && npm run ch12` |
-| **Ch. 13** | `genkit/src/ch13-trajectory-evaluators-genkit.ts`, `langchain/src/ch13-trajectory-evaluators-langsmith.ts` | Offline | `cd genkit && npm run ch13` / `cd langchain && npm run ch13` |
+| **Ch. 12** | `langchain/src/ch12-experiments-and-cicd.ts`, `langchain/src/ch12-eval-gate.ts`, `.github/workflows/agent-eval.yml` | Offline or `LANGSMITH_API_KEY` optional | `cd langchain && npm run ch12` / `npm run ch12:gate` |
+| **Ch. 13** | `genkit/src/ch13-trajectory-evaluators-genkit.ts`, `genkit/src/ch13-multi-turn-simulator.ts`, `langchain/src/ch13-trajectory-evaluators-langsmith.ts` | Offline | `cd genkit && npm run ch13` / `npm run ch13:sim` / `cd langchain && npm run ch13` |
 | **Ch. 14** | `langchain/src/ch14-feedback-and-annotation-queues.ts` | Local simulation or `LANGSMITH_API_KEY` | `cd langchain && npm run ch14` |
 | **Ch. 15** | `langchain/src/ch15-filtering-production-traces.ts` | Offline or `LANGSMITH_API_KEY` optional | `cd langchain && npm run ch15` |
 | **Ch. 16** | `langchain/src/ch16-online-eval-and-automations.ts` | Local simulation or `LANGSMITH_API_KEY` | `cd langchain && npm run ch16` |
@@ -50,6 +50,9 @@ Chapter 0 covers environment setup and the four-pillar map. All code examples be
 | **Ch. 18** | `langchain/src/ch18-privacy-pii-and-hitl.ts` | Offline | `cd langchain && npm run ch18` |
 | **Ch. 19** | `otel/src/ch19-production-architecture-blueprint.ts` | Offline | `cd otel && npm run ch19` |
 | **Ch. 20** | `genkit/src/ch20-observable-agent-from-day-one.ts`, `langchain/src/ch20-observable-agent-from-day-one.ts` | Local simulation or live keys | `cd genkit && npm run ch20` / `cd langchain && npm run ch20` |
+| **Ch. 21** | `otel/src/ch21-multi-agent-mcp-trace.ts`, `langchain/src/ch21-multi-agent-langsmith.ts` | Offline / W3C trace propagation | `cd otel && npm run ch21` / `cd langchain && npm run ch21` |
+| **Ch. 22** | `otel/src/ch22-streaming-otel.ts`, `genkit/src/ch22-streaming-flow.ts` | Local simulation or `GEMINI_API_KEY` | `cd otel && npm run ch22` / `cd genkit && npm run ch22` |
+| **Ch. 23** | `genkit/src/ch23-semantic-cache-guardrails.ts`, `langchain/src/ch23-semantic-cache-guardrails.ts`, `otel/src/ch23-resilience-otel.ts` | Offline | `cd genkit && npm run ch23` / `cd langchain && npm run ch23` / `cd otel && npm run ch23` |
 
 ---
 
