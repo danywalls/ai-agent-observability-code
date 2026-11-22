@@ -1,6 +1,24 @@
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { googleAI } from '@genkit-ai/google-genai';
 import { genkit, z } from 'genkit';
 import { setCustomMetadataAttributes } from 'genkit/tracing';
+
+function loadLocalEnv(): void {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ['../.env', '../../.env']) {
+    const envPath = resolve(currentDir, rel);
+    if (existsSync(envPath)) {
+      process.loadEnvFile?.(envPath);
+    }
+  }
+  if (!process.env.GEMINI_API_KEY && process.env.GOOGLE_API_KEY) {
+    process.env.GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
+  }
+}
+
+loadLocalEnv();
 
 /**
  * Chapter 20: How to Ask Your AI Assistant for an Observable Agent from Day 1
@@ -9,20 +27,24 @@ import { setCustomMetadataAttributes } from 'genkit/tracing';
  * Compare this file with Chapter 1 (`ch01-support-agent.ts`).
  * Includes from Day 1:
  * 1. Typed `defineFlow` and `defineTool` with strict Zod input/output schemas.
- * 2. Real ReAct agent loop via `ai.generate({ tools, maxTurns: 5 })`.
+ * 2. Real ReAct agent loop via `ai.generate({ tools, maxTurns: 5 })` (plus deterministic
+ *    local simulation fallback when `GEMINI_API_KEY` is not configured).
  * 3. Custom sub-spans via `ai.run()` for internal business logic & usage metrics.
  * 4. Custom business attributes via `setCustomMetadataAttributes()` for Genkit Monitoring.
  */
 
+const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+
 const ai = genkit({
-  plugins: [googleAI()],
-  model: googleAI.model('gemini-3-flash-preview'),
+  plugins: hasGeminiKey ? [googleAI()] : [],
+  ...(hasGeminiKey ? { model: googleAI.model('gemini-3-flash-preview') } : {}),
 });
 
 export const getOrderStatusTool = ai.defineTool(
   {
     name: 'getOrderStatus',
-    description: 'Fetch lean order status, daysSinceDelivery, and totalUsd by orderId (format A-XXXX).',
+    description:
+      'Fetch lean order status, daysSinceDelivery, and totalUsd by orderId (format A-XXXX).',
     inputSchema: z.object({
       orderId: z.string().describe('Order identifier matching A-XXXX'),
     }),
@@ -47,7 +69,8 @@ export const getOrderStatusTool = ai.defineTool(
 export const checkReturnPolicyTool = ai.defineTool(
   {
     name: 'checkReturnPolicy',
-    description: 'Check if a delivered order is eligible for a refund based on daysSinceDelivery and customerTier.',
+    description:
+      'Check if a delivered order is eligible for a refund based on daysSinceDelivery and customerTier.',
     inputSchema: z.object({
       daysSinceDelivery: z.number().describe('Days elapsed since order delivery'),
       customerTier: z.enum(['free', 'standard', 'vip']),
@@ -94,6 +117,27 @@ export const observableSupportFlow = ai.defineFlow(
       customer_tier: input.customerTier,
       prompt_version: input.promptVersion,
     });
+
+    // Local simulation fallback when running without a paid API key
+    if (!hasGeminiKey) {
+      const orderId = input.message.match(/A-\d{4}/)?.[0] ?? 'A-1002';
+      const order = await getOrderStatusTool({ orderId });
+      const policy = await checkReturnPolicyTool({
+        daysSinceDelivery: order.daysSinceDelivery,
+        customerTier: input.customerTier,
+      });
+      await ai.run('record-usage-metrics', { simulated: true }, async () => ({
+        inputTokens: 0,
+        outputTokens: 0,
+      }));
+      return {
+        answer: policy.eligible
+          ? `Order ${order.orderId} ($${order.totalUsd}) was delivered ${order.daysSinceDelivery} days ago and is eligible under your ${policy.maxWindowDays}-day ${input.customerTier} return window. - Store Support AI`
+          : `Order ${order.orderId} was delivered ${order.daysSinceDelivery} days ago, which is outside our ${policy.maxWindowDays}-day return window. - Store Support AI`,
+        eligibleForRefund: policy.eligible,
+        trajectory: ['getOrderStatus', 'checkReturnPolicy'],
+      };
+    }
 
     // 2. Real ReAct loop bounded by maxTurns: 5 and structured output
     const response = await ai.generate({
@@ -142,4 +186,13 @@ async function main() {
   console.log(JSON.stringify(result, null, 2));
 }
 
-main().catch(console.error);
+const isMain =
+  process.env.GENKIT_ENV !== 'dev' &&
+  Boolean(
+    process.argv[1] &&
+      fileURLToPath(import.meta.url).endsWith(process.argv[1].replace(/^.*\/src\//, '/src/'))
+  );
+
+if (isMain) {
+  main().catch(console.error);
+}

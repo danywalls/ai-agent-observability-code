@@ -1,11 +1,25 @@
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace';
 
+function loadLocalEnv(): void {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ['../.env', '../../.env']) {
+    const envPath = resolve(currentDir, rel);
+    if (existsSync(envPath)) {
+      process.loadEnvFile?.(envPath);
+    }
+  }
+}
+
+loadLocalEnv();
+
 /**
  * Chapter 19: Production Architecture and Choosing Your Stack
  *
- * All code, variable names, and comments are in English.
  * Demonstrates:
  * 1. Configuring a production-hardened OpenTelemetry pipeline (`BatchSpanProcessor`
  *    with bounded memory queues and timeouts) exporting to the Progress Observability
@@ -18,7 +32,7 @@ import { BatchSpanProcessor } from '@opentelemetry/sdk-trace';
  *      Experiments, MCP Server, and Agent Memory)
  * 3. A deterministic Stack Decision Engine across our 4 pillars:
  *    - Firebase Genkit + Genkit Monitoring
- *    - LangChain v1 + LangSmith
+ *    - LangChain + LangSmith
  *    - OpenTelemetry (`gen_ai.*`) + Progress Observability Platform
  */
 
@@ -130,15 +144,15 @@ export function recommendObservabilityStack(
     };
   }
 
-  // Scenario C: LangChain v1 TypeScript team needing deep agent workflows, HITL & Annotation Queues
+  // Scenario C: LangChain TypeScript team needing deep agent workflows, HITL & Annotation Queues
   return {
-    primaryStack: 'LangChain v1 + LangSmith',
+    primaryStack: 'LangChain + LangSmith',
     instrumentationLayer:
       'createAgent + middlewares (toolCallLimit, piiMiddleware, humanInTheLoop) + traceable()',
     evaluationAndMonitoringLayer:
       'LangSmith (Datasets, Side-by-Side Experiments, Annotation Queues, Online Evaluators & Automations)',
     rationale: [
-      'Turnkey tracing for LangChain v1 `createAgent` ReAct loops, threads, and built-in security middlewares.',
+      'Turnkey tracing for LangChain `createAgent` ReAct loops, threads, and built-in security middlewares.',
       'Best-in-class Annotation Queues, hierarchical trace filters (`traceFilter` / `treeFilter`), and Chained Automations.',
     ],
   };
@@ -150,7 +164,7 @@ async function main() {
     serviceName: 'store-support-agent-ts',
     environment: 'production',
     collectorUrl: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318',
-    progressApiKey: 'prog_live_demo_key',
+    progressApiKey: process.env.OBSERVABILITY_API_KEY ?? 'ac_p_demo_integration_key',
     captureMessageContent: false, // Privacy by default in production
   });
 
@@ -170,7 +184,7 @@ async function main() {
       },
     },
     {
-      label: 'Profile 2: Product AI Team using LangChain v1 with Human Review Queues',
+      label: 'Profile 2: Product AI Team using LangChain with Human Review Queues',
       req: {
         primaryFramework: 'langchain',
         hostsOnFirebaseOrGcp: false,
@@ -204,4 +218,10 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+const isMain =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url).endsWith(process.argv[1].replace(/^.*\/src\//, '/src/'));
+
+if (isMain) {
+  main().catch(console.error);
+}

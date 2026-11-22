@@ -1,9 +1,31 @@
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { Client } from 'langsmith';
+import { z } from 'zod';
+
+function loadLocalEnv(): void {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ['../.env', '../../.env']) {
+    const envPath = resolve(currentDir, rel);
+    if (existsSync(envPath)) {
+      process.loadEnvFile?.(envPath);
+    }
+  }
+  if (!process.env.GOOGLE_API_KEY && process.env.GEMINI_API_KEY) {
+    process.env.GOOGLE_API_KEY = process.env.GEMINI_API_KEY;
+  }
+  if (!process.env.GEMINI_API_KEY && process.env.GOOGLE_API_KEY) {
+    process.env.GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
+  }
+}
+
+loadLocalEnv();
 
 /**
  * Chapter 16: Online Evaluation and Automations
  *
- * All code, variable names, and comments are in English.
  * Demonstrates:
  * 1. The fundamental difference between Offline Evaluators (which have `referenceOutputs`)
  *    and Online Evaluators (which run on live production traces and ONLY have `inputs`,
@@ -13,7 +35,8 @@ import { Client } from 'langsmith';
  *    - Perceived Helpfulness to the user's question
  *    - Output Structure / Signature compliance
  *    - Executable / Valid Code or JSON syntax check
- * 3. Implementing the 5 Canonical Production Automation Rules:
+ * 3. Sampled LLM-as-a-Judge online groundedness check (`evaluateOnlineGroundednessWithJudge`)
+ * 4. Implementing the 5 Canonical Production Automation Rules:
  *    - Low-frequency random sampling (e.g. 5%) -> Annotation Queue
  *    - Negative user feedback (`user_thumb == 0`) -> Annotation Queue
  *    - Positive user feedback (`user_thumb == 1`) -> Golden Dataset
@@ -52,7 +75,7 @@ export type AutomationAction =
 const langsmithClient = new Client();
 
 /**
- * Step 1: Reference-Free Online Evaluators
+ * Step 1: Reference-Free Online Evaluators (Layer 1: deterministic, zero-cost, < 1 ms)
  * Notice that `referenceOutputs` does NOT exist here: these run asynchronously
  * on real user traffic where no human has written a ground-truth answer yet.
  */
@@ -98,6 +121,51 @@ export function runReferenceFreeOnlineEvaluators(
     online_structure_valid,
     online_json_compiles,
   };
+}
+
+/**
+ * Step 1b: Sampled LLM-as-a-Judge Online Groundedness Check (Layer 2)
+ * Evaluates whether every claim, price, and policy in `finalAnswer` is supported by `toolContext`.
+ */
+export const OnlineGroundednessSchema = z.object({
+  reasoning: z.string(),
+  grounded: z.boolean(),
+});
+
+export async function evaluateOnlineGroundednessWithJudge(
+  toolContext: string[],
+  finalAnswer: string
+): Promise<z.infer<typeof OnlineGroundednessSchema>> {
+  if (!process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
+    const combinedContext = toolContext.join(' ').toLowerCase();
+    const mentionedAmounts = finalAnswer.match(/\$\d+(\.\d{2})?/g) ?? [];
+    const unverified = mentionedAmounts.find(
+      (amt) => !combinedContext.includes(amt.replace('$', '').toLowerCase())
+    );
+    return {
+      grounded: !unverified,
+      reasoning: unverified
+        ? `Offline fallback judge: final answer mentions ${unverified}, which is absent from toolContext.`
+        : 'Offline fallback judge: all amounts in final answer are grounded in toolContext.',
+    };
+  }
+
+  const judgeModel = new ChatGoogleGenerativeAI({
+    model: 'gemini-3-flash-preview',
+    temperature: 0,
+  });
+  const structuredLlm = judgeModel.withStructuredOutput(OnlineGroundednessSchema);
+  return structuredLlm.invoke([
+    {
+      role: 'system',
+      content:
+        'Verify that every factual claim, price, and policy in the final answer is strictly supported by the tool outputs.',
+    },
+    {
+      role: 'user',
+      content: `TOOL OUTPUTS:\n${toolContext.join('\n')}\n\nFINAL ANSWER:\n${finalAnswer}`,
+    },
+  ]);
 }
 
 /**
@@ -167,6 +235,8 @@ export function evaluateAutomationRules(
   return actions;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Helper to persist Online Evaluation scores back onto the LangSmith trace as feedback.
  */
@@ -175,13 +245,17 @@ export async function attachOnlineScoresToTrace(
   scores: OnlineEvaluationScores,
   options: { dryRun?: boolean } = {}
 ): Promise<void> {
-  if (options.dryRun || !process.env.LANGSMITH_API_KEY) {
+  if (
+    options.dryRun ||
+    !process.env.LANGSMITH_API_KEY ||
+    !UUID_REGEX.test(run.runId)
+  ) {
     return;
   }
 
   for (const [key, score] of Object.entries(scores)) {
     await langsmithClient.createFeedback(run.runId, key, {
-      traceId: run.traceId,
+      ...(UUID_REGEX.test(run.traceId) ? { traceId: run.traceId } : {}),
       score,
       feedbackSourceType: 'model',
     });
@@ -236,7 +310,9 @@ async function main() {
 
   for (const run of sampleProductionRuns) {
     const scores = runReferenceFreeOnlineEvaluators(run);
-    await attachOnlineScoresToTrace(run, scores, { dryRun: true });
+    await attachOnlineScoresToTrace(run, scores, {
+      dryRun: !process.env.LANGSMITH_API_KEY,
+    });
 
     const triggeredActions = evaluateAutomationRules(run, scores, {
       randomSampleRoll: 0.25,
@@ -252,4 +328,10 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+const isMain =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url).endsWith(process.argv[1].replace(/^.*\/src\//, '/src/'));
+
+if (isMain) {
+  main().catch(console.error);
+}

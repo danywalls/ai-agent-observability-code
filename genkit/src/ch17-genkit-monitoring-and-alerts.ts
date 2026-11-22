@@ -1,11 +1,28 @@
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { googleAI } from '@genkit-ai/google-genai';
 import { genkit, z } from 'genkit';
 import { setCustomMetadataAttributes } from 'genkit/tracing';
 
+function loadLocalEnv(): void {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ['../.env', '../../.env']) {
+    const envPath = resolve(currentDir, rel);
+    if (existsSync(envPath)) {
+      process.loadEnvFile?.(envPath);
+    }
+  }
+  if (!process.env.GEMINI_API_KEY && process.env.GOOGLE_API_KEY) {
+    process.env.GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
+  }
+}
+
+loadLocalEnv();
+
 /**
  * Chapter 17: Genkit Monitoring, Dashboards, and Alerts
  *
- * All code, variable names, and comments are in English.
  * Demonstrates:
  * 1. Enriching Genkit flows with custom production attributes (`setCustomMetadataAttributes`)
  *    for Firebase Genkit Monitoring, LangSmith Monitoring View, and Progress Observability.
@@ -52,13 +69,17 @@ export const monitoredSupportFlow = ai.defineFlow(
       feature_name: 'order_support_chat',
     });
 
-    const stepResult = await ai.run('lookupOrderInDatabase', { orderId: input.orderId }, async () => {
-      return {
-        orderId: input.orderId,
-        status: 'in_transit',
-        carrier: 'DHL Express',
-      };
-    });
+    const stepResult = await ai.run(
+      'lookupOrderInDatabase',
+      { orderId: input.orderId },
+      async () => {
+        return {
+          orderId: input.orderId,
+          status: 'in_transit',
+          carrier: 'DHL Express',
+        };
+      }
+    );
 
     return {
       answer: `Order ${stepResult.orderId} is currently ${stepResult.status} via ${stepResult.carrier}.`,
@@ -194,7 +215,7 @@ async function main() {
       totalTokens: isTailSpike ? 8400 : 620,
       costUsd: isTailSpike ? 0.0185 : 0.0012,
       status: isError ? 'error' : 'success',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       promptVersion: 'v2.4',
       userThumb: i % 5 === 0 ? (isTailSpike ? 0 : 1) : undefined,
       onlineGroundedness: i >= 17 ? 0 : 1,
@@ -212,4 +233,13 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+const isMain =
+  process.env.GENKIT_ENV !== 'dev' &&
+  Boolean(
+    process.argv[1] &&
+      fileURLToPath(import.meta.url).endsWith(process.argv[1].replace(/^.*\/src\//, '/src/'))
+  );
+
+if (isMain) {
+  main().catch(console.error);
+}

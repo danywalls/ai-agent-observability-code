@@ -1,3 +1,7 @@
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Command, MemorySaver } from '@langchain/langgraph';
 import {
   applyStrategy,
   detectCreditCard,
@@ -8,25 +12,36 @@ import {
 import { Client } from 'langsmith';
 import { createAnonymizer, createSecretAnonymizer } from 'langsmith/anonymizer';
 
+function loadLocalEnv(): void {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ['../.env', '../../.env']) {
+    const envPath = resolve(currentDir, rel);
+    if (existsSync(envPath)) {
+      process.loadEnvFile?.(envPath);
+    }
+  }
+}
+
+loadLocalEnv();
+
 /**
  * Chapter 18: Privacy and Security: What NOT to Store in Your Traces
  *
- * All code, variable names, and comments are in English.
  * Demonstrates:
  * 1. Client-side trace anonymization in LangSmith (`createAnonymizer` and
  *    `createSecretAnonymizer`) so credit cards, emails, and API keys are
  *    scrubbed in memory BEFORE leaving your Node.js server.
- * 2. LangChain v1's built-in `piiMiddleware` (`redact`, `mask`, `hash`, `block`)
+ * 2. LangChain's built-in `piiMiddleware` (`redact`, `mask`, `hash`, `block`)
  *    plus Luhn-validated `detectCreditCard` and `detectEmail` helpers so PII
  *    never even reaches the LLM provider.
- * 3. Prompt injection & unauthorized side-effect defense using LangChain v1's
- *    `humanInTheLoopMiddleware` to pause `requestRefund` calls above $100 for
- *    human approval (`approve`, `edit`, `reject`).
+ * 3. Prompt injection & unauthorized side-effect defense using LangChain's
+ *    `humanInTheLoopMiddleware` to pause `requestRefund` calls above $50 for
+ *    human approval (`approve`, `edit`, `reject`) with `MemorySaver` and `Command`.
  */
 
 /**
  * Layer 1: Redact PII before the prompt even reaches the LLM (and before spans record it)
- * using LangChain v1's built-in PII detectors and strategies.
+ * using LangChain's built-in PII detectors and strategies.
  */
 export function sanitizeCustomerMessageForLlm(rawMessage: string): {
   sanitizedText: string;
@@ -47,7 +62,7 @@ export function sanitizeCustomerMessageForLlm(rawMessage: string): {
 }
 
 /**
- * Layer 2: Configure LangChain v1 `createAgent` middlewares for PII protection
+ * Layer 2: Configure LangChain `createAgent` middlewares for PII protection
  * and Human-in-the-Loop (HITL) approval on high-risk tools (`requestRefund`).
  */
 export const supportAgentSecurityMiddlewares = [
@@ -66,7 +81,7 @@ export const supportAgentSecurityMiddlewares = [
     applyToOutput: true,
     applyToToolResults: true,
   }),
-  // Block any accidental API key leak in user input or tool output
+  // Redact any accidental API key leak in user input or tool output
   piiMiddleware('api_key', {
     detector: /sk-[a-zA-Z0-9]{20,}/g,
     strategy: 'redact',
@@ -78,11 +93,28 @@ export const supportAgentSecurityMiddlewares = [
     interruptOn: {
       requestRefund: {
         allowedDecisions: ['approve', 'edit', 'reject'],
-        description: 'Refund execution requires human supervisor approval before charging Stripe.',
+        description:
+          'Refund execution requires human supervisor approval before charging Stripe.',
       },
     },
   }),
 ];
+
+/**
+ * Layer 2b: Helper showing how `MemorySaver` and `Command({ resume })` persist
+ * and resume a paused HITL graph after supervisor approval.
+ */
+export function buildHitlResumeCommand(
+  threadId: string,
+  decision: { type: 'approve' | 'edit' | 'reject'; args?: Record<string, unknown> }
+) {
+  const checkpointer = new MemorySaver();
+  const config = { configurable: { thread_id: threadId } };
+  const resumeCommand = new Command({
+    resume: { decisions: [decision] },
+  });
+  return { checkpointer, config, resumeCommand };
+}
 
 /**
  * Layer 3: Configure a LangSmith Client with `createSecretAnonymizer` + custom PII rules
@@ -169,9 +201,9 @@ async function main() {
   console.log('=== 1. Raw Customer Input (Contains PII & Secrets!) ===');
   console.log(rawCustomerInput);
 
-  // Test Layer 1: LangChain v1 PII strategies (hash email + Luhn-validated card mask)
+  // Test Layer 1: LangChain PII strategies (hash email + Luhn-validated card mask)
   const llmSanitized = sanitizeCustomerMessageForLlm(rawCustomerInput);
-  console.log('\n=== 2. After LangChain v1 PII Strategies (Sent to LLM) ===');
+  console.log('\n=== 2. After LangChain PII Strategies (Sent to LLM) ===');
   console.log(JSON.stringify(llmSanitized, null, 2));
 
   // Test Layer 3: LangSmith Client-Side Trace Anonymizer (Nested Object Scrubbing)
@@ -212,4 +244,10 @@ async function main() {
   console.log('Prompt Injection Attempt:', maliciousPromptInjection);
 }
 
-main().catch(console.error);
+const isMain =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url).endsWith(process.argv[1].replace(/^.*\/src\//, '/src/'));
+
+if (isMain) {
+  main().catch(console.error);
+}

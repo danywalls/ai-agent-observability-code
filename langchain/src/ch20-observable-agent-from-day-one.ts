@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { awaitAllCallbacks } from '@langchain/core/callbacks/promises';
 import {
   humanInTheLoopMiddleware,
   modelCallLimitMiddleware,
@@ -11,9 +15,24 @@ import { createSecretAnonymizer } from 'langsmith/anonymizer';
 import { getCurrentRunTree, traceable } from 'langsmith/traceable';
 import { z } from 'zod';
 
+function loadLocalEnv(): void {
+  const currentDir = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ['../.env', '../../.env']) {
+    const envPath = resolve(currentDir, rel);
+    if (existsSync(envPath)) {
+      process.loadEnvFile?.(envPath);
+    }
+  }
+  if (!process.env.GOOGLE_API_KEY && process.env.GEMINI_API_KEY) {
+    process.env.GOOGLE_API_KEY = process.env.GEMINI_API_KEY;
+  }
+}
+
+loadLocalEnv();
+
 /**
  * Chapter 20: How to Ask Your AI Assistant for an Observable Agent from Day 1
- * (LangChain v1 + LangSmith Reference Template)
+ * (LangChain + LangSmith Reference Template)
  *
  * Compare this file with Chapter 1 (`ch01-support-agent.ts`).
  * Every single production lesson from Chapters 1-19 is baked in from Day 1:
@@ -37,6 +56,7 @@ export const getOrderStatusTool = tool(
     > = {
       'A-1001': { orderId: 'A-1001', status: 'in_transit', daysSinceDelivery: 0, totalUsd: 89.99 },
       'A-1002': { orderId: 'A-1002', status: 'delivered', daysSinceDelivery: 45, totalUsd: 120.0 },
+      'A-1003': { orderId: 'A-1003', status: 'delivered', daysSinceDelivery: 12, totalUsd: 15.5 },
     };
     const record = mockDb[orderId];
     if (!record) {
@@ -46,30 +66,35 @@ export const getOrderStatusTool = tool(
   },
   {
     name: 'getOrderStatus',
-    description: 'Fetch lean order status, daysSinceDelivery, and totalUsd by orderId (e.g. A-1001).',
+    description:
+      'Fetch lean order status, daysSinceDelivery, and totalUsd by orderId (e.g. A-1001).',
     schema: z.object({
-      orderId: z.string().regex(/^A-\d{4}$/, 'Order ID must match A-XXXX'),
+      orderId: z.string().regex(/^A-\d{4}$/, 'Order ID must match A-XXXX').describe('Order ID A-XXXX'),
     }),
   }
 );
 
 export const checkReturnPolicyTool = tool(
-  async ({ daysSinceDelivery }) => {
-    const eligible = daysSinceDelivery <= 30;
+  async ({ daysSinceDelivery, customerTier = 'standard' }) => {
+    const maxWindowDays = customerTier === 'vip' ? 60 : 30;
+    const eligible = daysSinceDelivery <= maxWindowDays;
     return JSON.stringify({
       eligible,
-      maxWindowDays: 30,
+      maxWindowDays,
       daysSinceDelivery,
+      customerTier,
       policyRule: eligible
-        ? 'Eligible for standard refund within 30-day window.'
-        : 'Outside 30-day return window; refund must be declined.',
+        ? `Eligible for refund within ${maxWindowDays}-day ${customerTier} window.`
+        : `Outside ${maxWindowDays}-day ${customerTier} return window; refund must be declined.`,
     });
   },
   {
     name: 'checkReturnPolicy',
-    description: 'Check whether an order is eligible for return based on daysSinceDelivery.',
+    description:
+      'Check whether an order is eligible for return based on daysSinceDelivery and customerTier.',
     schema: z.object({
-      daysSinceDelivery: z.number().int().nonnegative(),
+      daysSinceDelivery: z.number().int().nonnegative().describe('Days elapsed since delivery'),
+      customerTier: z.enum(['free', 'standard', 'vip']).optional().describe('Customer tier'),
     }),
   }
 );
@@ -113,6 +138,7 @@ export interface ObservableAgentResponse {
   traceId: string;
   threadId: string;
   answer: string;
+  eligibleForRefund: boolean;
   trajectory: string[];
   latencyMs: number;
 }
@@ -151,22 +177,25 @@ export const invokeObservableSupportAgent = traceable(
 
     const rawPolicy = await checkReturnPolicyTool.invoke({
       daysSinceDelivery: parsedOrder.daysSinceDelivery,
+      customerTier: req.customerTier,
     });
     trajectory.push('checkReturnPolicy');
     const parsedPolicy = JSON.parse(String(rawPolicy)) as {
       eligible: boolean;
+      maxWindowDays: number;
       policyRule: string;
     };
 
     const answer = parsedPolicy.eligible
-      ? `Order ${parsedOrder.orderId} ($${parsedOrder.totalUsd}) is eligible for a refund. - Store Support AI`
-      : `Order ${parsedOrder.orderId} was delivered ${parsedOrder.daysSinceDelivery} days ago, which is outside our 30-day return window. - Store Support AI`;
+      ? `Order ${parsedOrder.orderId} ($${parsedOrder.totalUsd}) was delivered ${parsedOrder.daysSinceDelivery} days ago and is eligible under your ${parsedPolicy.maxWindowDays}-day ${req.customerTier} return window. - Store Support AI`
+      : `Order ${parsedOrder.orderId} was delivered ${parsedOrder.daysSinceDelivery} days ago, which is outside our ${parsedPolicy.maxWindowDays}-day return window. - Store Support AI`;
 
     return {
       runId,
       traceId,
       threadId: req.threadId,
       answer,
+      eligibleForRefund: parsedPolicy.eligible,
       trajectory,
       latencyMs: Date.now() - startTime,
     };
@@ -195,7 +224,18 @@ async function main() {
     response.trajectory[0] === 'getOrderStatus' &&
     response.trajectory[1] === 'checkReturnPolicy' &&
     !response.trajectory.includes('requestRefund');
-  console.log(`\n[Day-1 CI Smoke Check] Trajectory Valid: ${passedTrajectory ? 'PASS ✅' : 'FAIL ❌'}`);
+  console.log(
+    `\n[Day-1 CI Smoke Check] Trajectory Valid: ${passedTrajectory ? 'PASS ✅' : 'FAIL ❌'}`
+  );
+
+  await awaitAllCallbacks();
+  await privacySafeClient.awaitPendingTraceBatches();
 }
 
-main().catch(console.error);
+const isMain =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url).endsWith(process.argv[1].replace(/^.*\/src\//, '/src/'));
+
+if (isMain) {
+  main().catch(console.error);
+}
