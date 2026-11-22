@@ -37,8 +37,8 @@ Chapter 0 covers environment setup and the four-pillar map. All code examples be
 | **Ch. 05** | `genkit/src/ch05-genkit-devtools-trace.ts` | Local simulation or `GEMINI_API_KEY` | `cd genkit && npm run ch05` |
 | **Ch. 06** | `langchain/src/ch06-langsmith-first-trace.ts` | Local simulation or `LANGSMITH_API_KEY` | `cd langchain && npm run ch06` |
 | **Ch. 07** | `langchain/src/ch07-trace-anatomy-and-threads.ts` | Offline or `LANGSMITH_API_KEY` optional | `cd langchain && npm run ch07` |
-| **Ch. 08** | `otel/src/ch08-otel-genai-conventions.ts` | Offline / OTLP optional | `cd otel && npm run ch08` |
-| **Ch. 09** | `otel/src/ch09-three-lenses-comparison.ts` | Offline | `cd otel && npm run ch09` |
+| **Ch. 08** | `otel/src/ch08-progress-observability.ts` | Offline preview or live `GOOGLE_API_KEY` + `OBSERVABILITY_API_KEY` (`ac_p_...`) | `cd otel && npm run ch08` |
+| **Ch. 09** | `otel/src/ch09-otel-and-three-lenses.ts` | Offline / OTLP optional | `cd otel && npm run ch09` |
 | **Ch. 10** | `genkit/src/ch10-golden-dataset.ts`, `langchain/src/ch10-datasets-langsmith.ts` | Genkit: Offline; LangChain: `LANGSMITH_API_KEY` optional | `cd genkit && npm run ch10` / `cd langchain && npm run ch10` |
 | **Ch. 11** | `genkit/src/ch11-evaluators-genkit.ts`, `langchain/src/ch11-evaluators-langsmith.ts` | Genkit: `GEMINI_API_KEY`; LangChain: Offline | `cd genkit && npm run ch11` / `cd langchain && npm run ch11` |
 | **Ch. 12** | `langchain/src/ch12-experiments-and-cicd.ts`, `langchain/src/ch12-eval-gate.ts`, `.github/workflows/agent-eval.yml` | Offline or `LANGSMITH_API_KEY` optional | `cd langchain && npm run ch12` / `npm run ch12:gate` |

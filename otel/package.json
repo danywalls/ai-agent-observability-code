@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "ch08": "tsx src/ch08-otel-genai-conventions.ts",
-    "ch09": "tsx src/ch09-three-lenses-comparison.ts",
+    "ch08": "tsx src/ch08-progress-observability.ts",
+    "ch09": "tsx src/ch09-otel-and-three-lenses.ts",
     "ch19": "tsx src/ch19-production-architecture-blueprint.ts",
     "ch21": "tsx src/ch21-multi-agent-mcp-trace.ts",
     "ch22": "tsx src/ch22-streaming-otel.ts",
@@ -18,13 +18,18 @@
   "type": "module",
   "private": true,
   "dependencies": {
+    "@google/genai": "^3.6.1",
     "@opentelemetry/api": "^1.10.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.301.2",
-    "@opentelemetry/sdk-node": "^0.301.2"
+    "@opentelemetry/sdk-node": "^0.301.2",
+    "@progress/observability": "^3.2.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "@opentelemetry/api": "$@opentelemetry/api"
   }
 }
