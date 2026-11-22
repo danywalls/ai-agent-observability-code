@@ -1,13 +1,13 @@
-type PersonaId = 'impatient-vip' | 'ambiguous-order' | 'mind-changer';
+export type PersonaId = 'impatient-vip' | 'ambiguous-order' | 'mind-changer';
 
-interface TurnStep {
+export interface TurnStep {
   turn: number;
   userMessage: string;
   toolsCalled: Array<{ name: string; argsKey: string; failedTransient?: boolean }>;
   assistantReply: string;
 }
 
-interface TrajectoryEfficiencyReport {
+export interface TrajectoryEfficiencyReport {
   persona: PersonaId;
   optimalSteps: number;
   actualSteps: number;
@@ -16,7 +16,7 @@ interface TrajectoryEfficiencyReport {
   trajectoryEfficiency: number;
 }
 
-function evaluateTrajectoryEfficiency(
+export function evaluateTrajectoryEfficiency(
   persona: PersonaId,
   turns: TurnStep[],
   optimalSteps: number
@@ -63,7 +63,7 @@ function evaluateTrajectoryEfficiency(
   };
 }
 
-async function runMultiTurnSimulation(persona: PersonaId): Promise<TrajectoryEfficiencyReport> {
+export async function runMultiTurnSimulation(persona: PersonaId): Promise<TrajectoryEfficiencyReport> {
   const simulations: Record<PersonaId, { optimalSteps: number; turns: TurnStep[] }> = {
     'impatient-vip': {
       optimalSteps: 2,
@@ -135,13 +135,15 @@ async function runMultiTurnSimulation(persona: PersonaId): Promise<TrajectoryEff
   return evaluateTrajectoryEfficiency(persona, sim.turns, sim.optimalSteps);
 }
 
-async function main() {
+export async function main() {
   const personas: PersonaId[] = ['impatient-vip', 'ambiguous-order', 'mind-changer'];
   const reports = await Promise.all(personas.map((p) => runMultiTurnSimulation(p)));
   console.table(reports);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

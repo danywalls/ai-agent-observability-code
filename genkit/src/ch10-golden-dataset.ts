@@ -12,7 +12,7 @@
  * including both the expected tool trajectory and key facts), and `context`.
  *
  * Run to validate the dataset schema and print a split summary:
- *   npx tsx src/ch10-golden-dataset.ts
+ *   npm run ch10
  */
 import { z, BaseDataPointSchema } from 'genkit';
 

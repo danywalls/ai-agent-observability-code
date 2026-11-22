@@ -10,14 +10,20 @@
  *   3. Step budget (`maxAllowedToolCalls`)
  *
  * Run:
- *   npx tsx src/ch13-trajectory-evaluators-genkit.ts
+ *   npm run ch13
  */
 import { genkit, type MessageData } from 'genkit';
 import { googleAI } from '@genkit-ai/google-genai';
 
+try {
+  process.loadEnvFile?.();
+} catch {
+  // Optional .env file in genkit/
+}
+
 const ai = genkit({
   plugins: [googleAI()],
-  model: googleAI.model('gemini-2.5-flash'),
+  model: googleAI.model('gemini-3-flash-preview'),
 });
 
 export interface ToolCallStep {
@@ -114,66 +120,71 @@ export const agentTrajectoryEvaluator = ai.defineEvaluator(
   },
 );
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const results = await ai.evaluate({
-    evaluator: agentTrajectoryEvaluator,
-    dataset: [
-      {
-        testCaseId: 'traj-01-clean-refund-flow',
-        input: { question: 'Refund order A-1003 please.' },
-        output: {
-          reply: 'Your refund REF-A-1003 has been processed.',
-          toolTrajectory: [
-            { name: 'getOrder', input: { orderId: 'A-1003' } },
-            { name: 'searchFaq', input: { query: 'refund policy' } },
-            { name: 'requestRefund', input: { orderId: 'A-1003', reason: 'customer request' } },
-          ],
+if (import.meta.url === `file://${process.argv[1]}` && process.env.GENKIT_ENV !== 'dev') {
+  void (async () => {
+    const results = await ai.evaluate({
+      evaluator: agentTrajectoryEvaluator,
+      dataset: [
+        {
+          testCaseId: 'traj-01-clean-refund-flow',
+          input: { question: 'Refund order A-1003 please.' },
+          output: {
+            reply: 'Your refund REF-A-1003 has been processed.',
+            toolTrajectory: [
+              { name: 'getOrder', input: { orderId: 'A-1003' } },
+              { name: 'searchFaq', input: { query: 'refund policy' } },
+              { name: 'requestRefund', input: { orderId: 'A-1003', reason: 'customer request' } },
+            ],
+          },
+          reference: {
+            expectedToolsCalled: ['getOrder', 'searchFaq', 'requestRefund'],
+            strictOrder: true,
+            maxToolCalls: 4,
+          },
         },
-        reference: {
-          expectedToolsCalled: ['getOrder', 'searchFaq', 'requestRefund'],
-          strictOrder: true,
-          maxToolCalls: 4,
+        {
+          // ⚠️ Dangerous fail #1: "Lucky Guess / Skipped Verification": called requestRefund WITHOUT checking getOrder!
+          testCaseId: 'traj-02-skipped-verification',
+          input: { question: 'Refund order A-1003 please.' },
+          output: {
+            reply: 'Your refund REF-A-1003 has been processed.',
+            toolTrajectory: [
+              { name: 'requestRefund', input: { orderId: 'A-1003', reason: 'customer request' } },
+            ],
+          },
+          reference: {
+            expectedToolsCalled: ['getOrder', 'searchFaq', 'requestRefund'],
+            strictOrder: true,
+            maxToolCalls: 4,
+          },
         },
-      },
-      {
-        // ⚠️ Dangerous fail #1: "Lucky Guess / Skipped Verification": called requestRefund WITHOUT checking getOrder!
-        testCaseId: 'traj-02-skipped-verification',
-        input: { question: 'Refund order A-1003 please.' },
-        output: {
-          reply: 'Your refund REF-A-1003 has been processed.',
-          toolTrajectory: [
-            { name: 'requestRefund', input: { orderId: 'A-1003', reason: 'customer request' } },
-          ],
+        {
+          // ⚠️ Dangerous fail #2: Agent got stuck calling getOrder 3 times with the exact same arguments!
+          testCaseId: 'traj-03-redundant-loop',
+          input: { question: 'Where is order A-1001?' },
+          output: {
+            reply: 'Your order A-1001 is shipped.',
+            toolTrajectory: [
+              { name: 'getOrder', input: { orderId: 'A-1001' } },
+              { name: 'getOrder', input: { orderId: 'A-1001' } },
+              { name: 'getOrder', input: { orderId: 'A-1001' } },
+            ],
+          },
+          reference: {
+            expectedToolsCalled: ['getOrder'],
+            strictOrder: false,
+            maxToolCalls: 2,
+          },
         },
-        reference: {
-          expectedToolsCalled: ['getOrder', 'searchFaq', 'requestRefund'],
-          strictOrder: true,
-          maxToolCalls: 4,
-        },
-      },
-      {
-        // ⚠️ Dangerous fail #2: Agent got stuck calling getOrder 3 times with the exact same arguments!
-        testCaseId: 'traj-03-redundant-loop',
-        input: { question: 'Where is order A-1001?' },
-        output: {
-          reply: 'Your order A-1001 is shipped.',
-          toolTrajectory: [
-            { name: 'getOrder', input: { orderId: 'A-1001' } },
-            { name: 'getOrder', input: { orderId: 'A-1001' } },
-            { name: 'getOrder', input: { orderId: 'A-1001' } },
-          ],
-        },
-        reference: {
-          expectedToolsCalled: ['getOrder'],
-          strictOrder: false,
-          maxToolCalls: 2,
-        },
-      },
-    ],
-  });
+      ],
+    });
 
-  console.log('=== Genkit Trajectory Evaluation Results ===');
-  for (const r of results) {
-    console.log(r.testCaseId, '->', r.evaluation);
-  }
+    console.log('=== Genkit Trajectory Evaluation Results ===');
+    for (const r of results) {
+      console.log(r.testCaseId, '->', r.evaluation);
+    }
+  })().catch((err) => {
+    console.error('Chapter 13 Genkit trajectory evaluation failed:', err);
+    process.exit(1);
+  });
 }

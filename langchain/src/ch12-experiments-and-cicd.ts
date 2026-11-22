@@ -9,29 +9,27 @@
  *   2. Using `numRepetitions`, `maxConcurrency`, and `metadata` (prompt version, git SHA).
  *   3. Comparing side-by-side per-example regressions and enforcing a CI/CD quality gate.
  *
- * Works locally out of the box (`uploadRuns: false`) or uploads live to LangSmith when
+ * Works locally out of the box or syncs & uploads experiments live to LangSmith when
  * `LANGSMITH_API_KEY` is set.
  *
  * Run:
- *   npx tsx src/ch12-experiments-and-cicd.ts
+ *   npm run ch12
  */
+import { awaitAllCallbacks } from '@langchain/core/callbacks/promises';
 import { evaluate } from 'langsmith/evaluation';
-import type { Example } from 'langsmith/schemas';
-import { INITIAL_DATASET_ROWS } from './ch10-datasets-langsmith.js';
+import { INITIAL_DATASET_ROWS, syncSupportDatasetToLangSmith } from './ch10-datasets-langsmith.js';
 import {
   mustMentionFactsEvaluator,
   noHallucinatedOrderIdEvaluator,
 } from './ch11-evaluators-langsmith.js';
 
-// Convert our Golden Dataset seed rows into LangSmith Example objects
-const goldenExamples: Example[] = INITIAL_DATASET_ROWS.map((row) => ({
-  id: `00000000-0000-4000-8000-${row.id.replace(/\D/g, '').padStart(12, '0')}`,
-  dataset_id: '00000000-0000-4000-8000-000000000000',
-  inputs: row.inputs,
-  outputs: row.outputs,
-  created_at: '2026-11-14T00:00:00Z',
-  runs: [],
-}));
+try {
+  process.loadEnvFile?.();
+} catch {
+  // Optional .env file in langchain/
+}
+
+export const GOLDEN_DATASET_NAME = 'store-support-golden-v1';
 
 // ---------------------------------------------------------------------------
 // Target 1: Agent v1 (Baseline: has the VIP 30-day bug & lowercase promo bug)
@@ -98,47 +96,63 @@ export async function runAgentV2Candidate(inputs: {
   };
 }
 
-// Run an experiment with `evaluate()` and collect per-example scores
+interface ExperimentRowSummary {
+  exampleId: string;
+  question: string;
+  factsScore: number;
+  noHallucinationScore: number;
+}
+
+// Run an experiment with `evaluate()` in LangSmith (or cleanly offline when no API key is set)
 export async function runExperiment(
   experimentPrefix: string,
   targetFn: typeof runAgentV1Baseline,
   promptVersion: string,
 ) {
-  const shouldUpload = Boolean(process.env.LANGSMITH_API_KEY);
+  const rows: ExperimentRowSummary[] = [];
 
-  const results = await evaluate(targetFn, {
-    data: goldenExamples,
-    evaluators: [mustMentionFactsEvaluator, noHallucinatedOrderIdEvaluator],
-    experimentPrefix,
-    numRepetitions: 1,
-    maxConcurrency: 4,
-    uploadRuns: shouldUpload,
-    metadata: {
-      prompt_version: promptVersion,
-      model: 'gemini-2.5-flash',
-      git_sha: process.env.GIT_SHA ?? 'local-dev',
-    },
-  });
+  if (process.env.LANGSMITH_API_KEY) {
+    await syncSupportDatasetToLangSmith(GOLDEN_DATASET_NAME);
 
-  const rows: Array<{
-    exampleId: string;
-    question: string;
-    factsScore: number;
-    noHallucinationScore: number;
-  }> = [];
-
-  for (const row of results.results) {
-    const evals = row.evaluationResults.results;
-    const factsScore = Number(evals.find((e) => e.key === 'must_mention_facts')?.score ?? 0);
-    const noHallucinationScore = Number(
-      evals.find((e) => e.key === 'no_hallucinated_order_id')?.score ?? 0,
-    );
-    rows.push({
-      exampleId: row.example.id.slice(-4),
-      question: String(row.example.inputs.question).slice(0, 38),
-      factsScore,
-      noHallucinationScore,
+    const results = await evaluate(targetFn, {
+      data: GOLDEN_DATASET_NAME,
+      evaluators: [mustMentionFactsEvaluator, noHallucinatedOrderIdEvaluator],
+      experimentPrefix,
+      numRepetitions: 1,
+      maxConcurrency: 4,
+      uploadRuns: true,
+      metadata: {
+        prompt_version: promptVersion,
+        model: 'gemini-3-flash-preview',
+        git_sha: process.env.GIT_SHA ?? 'local-dev',
+      },
     });
+
+    for (const row of results.results) {
+      const evals = row.evaluationResults.results;
+      const question = String(row.example.inputs.question);
+      const matchedSeed = INITIAL_DATASET_ROWS.find((r) => r.inputs.question === question);
+      rows.push({
+        exampleId: matchedSeed?.id ?? row.example.id.slice(-4),
+        question: question.slice(0, 38),
+        factsScore: Number(evals.find((e) => e.key === 'must_mention_facts')?.score ?? 0),
+        noHallucinationScore: Number(evals.find((e) => e.key === 'no_hallucinated_order_id')?.score ?? 0),
+      });
+    }
+  } else {
+    // Offline fallback: evaluate directly against INITIAL_DATASET_ROWS without uninitialized RunTree warnings
+    for (const row of INITIAL_DATASET_ROWS) {
+      const outputs = await targetFn(row.inputs);
+      const args = { inputs: row.inputs, outputs, referenceOutputs: row.outputs };
+      const factsEval = await mustMentionFactsEvaluator(args);
+      const hallucinationEval = await noHallucinatedOrderIdEvaluator(args);
+      rows.push({
+        exampleId: row.id,
+        question: row.inputs.question.slice(0, 38),
+        factsScore: Number(factsEval.score ?? 0),
+        noHallucinationScore: Number(hallucinationEval.score ?? 0),
+      });
+    }
   }
 
   rows.sort((a, b) => a.exampleId.localeCompare(b.exampleId));
@@ -147,32 +161,39 @@ export async function runExperiment(
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const expV1 = await runExperiment('support-agent-v1', runAgentV1Baseline, 'v1.0');
-  const expV2 = await runExperiment('support-agent-v2', runAgentV2Candidate, 'v2.0');
+  void (async () => {
+    const expV1 = await runExperiment('support-agent-v1', runAgentV1Baseline, 'v1.0');
+    const expV2 = await runExperiment('support-agent-v2', runAgentV2Candidate, 'v2.0');
 
-  const sideBySide = expV1.rows.map((r1, idx) => {
-    const r2 = expV2.rows[idx];
-    const delta = r2.factsScore - r1.factsScore;
-    return {
-      example: r1.exampleId,
-      question: r1.question,
-      v1_facts: r1.factsScore,
-      v2_facts: r2.factsScore,
-      change: delta > 0 ? `+${delta} (IMPROVED)` : delta < 0 ? `${delta} (REGRESSED!)` : '0 (same)',
-    };
-  });
+    const sideBySide = expV1.rows.map((r1, idx) => {
+      const r2 = expV2.rows[idx];
+      const delta = r2.factsScore - r1.factsScore;
+      return {
+        example: r1.exampleId,
+        question: r1.question,
+        v1_facts: r1.factsScore,
+        v2_facts: r2.factsScore,
+        change: delta > 0 ? `+${delta} (IMPROVED)` : delta < 0 ? `${delta} (REGRESSED!)` : '0 (same)',
+      };
+    });
 
-  console.log('=== Side-by-Side Experiment Comparison (v1 vs v2) ===');
-  console.table(sideBySide);
-  console.log(
-    `Average Facts Score: v1=${(expV1.avgFacts * 100).toFixed(0)}% -> v2=${(expV2.avgFacts * 100).toFixed(0)}%`,
-  );
+    console.log('=== Side-by-Side Experiment Comparison (v1 vs v2) ===');
+    console.table(sideBySide);
+    console.log(
+      `Average Facts Score: v1=${(expV1.avgFacts * 100).toFixed(0)}% -> v2=${(expV2.avgFacts * 100).toFixed(0)}%`,
+    );
 
-  // CI/CD Quality Gate: fail the build if any example regressed or average < 95%
-  const hasRegression = expV1.rows.some((r1, i) => expV2.rows[i].factsScore < r1.factsScore);
-  if (hasRegression || expV2.avgFacts < 0.95) {
-    console.error('❌ CI Quality Gate FAILED: regression detected or score below threshold.');
+    await awaitAllCallbacks();
+
+    // CI/CD Quality Gate: fail the build if any example regressed or average < 95%
+    const hasRegression = expV1.rows.some((r1, i) => expV2.rows[i].factsScore < r1.factsScore);
+    if (hasRegression || expV2.avgFacts < 0.95) {
+      console.error('❌ CI Quality Gate FAILED: regression detected or score below threshold.');
+      process.exit(1);
+    }
+    console.log('✅ CI Quality Gate PASSED: ready to deploy v2 to production with confidence!');
+  })().catch((err) => {
+    console.error('Chapter 12 experiment failed:', err);
     process.exit(1);
-  }
-  console.log('✅ CI Quality Gate PASSED: ready to deploy v2 to production with confidence!');
+  });
 }

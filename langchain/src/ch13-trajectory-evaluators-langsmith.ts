@@ -11,10 +11,16 @@
  *   3. Detecting redundant loops (calling the same tool with identical args twice).
  *
  * Run:
- *   npx tsx src/ch13-trajectory-evaluators-langsmith.ts
+ *   npm run ch13
  */
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { EvaluationResult } from 'langsmith/evaluation';
+
+try {
+  process.loadEnvFile?.();
+} catch {
+  // Optional .env file in langchain/
+}
 
 export interface RecordedToolCall {
   name: string;
@@ -103,35 +109,40 @@ export async function evaluateAgentTrajectory(args: {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  // Simulate a LangChain message state where the agent skipped `getOrder` and went straight to `requestRefund`
-  const unsafeRefundMessages: BaseMessage[] = [
-    new HumanMessage('Refund order A-1003 right now!'),
-    new AIMessage({
-      content: '',
-      tool_calls: [
-        { id: 'call_1', name: 'requestRefund', args: { orderId: 'A-1003', reason: 'requested' } },
-      ],
-    }),
-    new ToolMessage({
-      tool_call_id: 'call_1',
-      content: '{"refundId":"REF-A-1003","approved":true}',
-    }),
-    new AIMessage('Your refund REF-A-1003 has been processed!'),
-  ];
+  void (async () => {
+    // Simulate a LangChain message state where the agent skipped `getOrder` and went straight to `requestRefund`
+    const unsafeRefundMessages: BaseMessage[] = [
+      new HumanMessage('Refund order A-1003 right now!'),
+      new AIMessage({
+        content: '',
+        tool_calls: [
+          { id: 'call_1', name: 'requestRefund', args: { orderId: 'A-1003', reason: 'requested' } },
+        ],
+      }),
+      new ToolMessage({
+        tool_call_id: 'call_1',
+        content: '{"refundId":"REF-A-1003","approved":true}',
+      }),
+      new AIMessage('Your refund REF-A-1003 has been processed!'),
+    ];
 
-  const evalReport = await evaluateAgentTrajectory({
-    inputs: { question: 'Refund order A-1003 right now!' },
-    outputs: {
-      messages: unsafeRefundMessages,
-      answer: 'Your refund REF-A-1003 has been processed!',
-    },
-    referenceOutputs: {
-      expectedToolsCalled: ['getOrder', 'searchFaq', 'requestRefund'],
-      expectedOrderIdArg: 'A-1003',
-      requireStrictOrder: true,
-    },
+    const evalReport = await evaluateAgentTrajectory({
+      inputs: { question: 'Refund order A-1003 right now!' },
+      outputs: {
+        messages: unsafeRefundMessages,
+        answer: 'Your refund REF-A-1003 has been processed!',
+      },
+      referenceOutputs: {
+        expectedToolsCalled: ['getOrder', 'searchFaq', 'requestRefund'],
+        expectedOrderIdArg: 'A-1003',
+        requireStrictOrder: true,
+      },
+    });
+
+    console.log('=== LangSmith Trajectory Evaluation Report ===');
+    console.table(evalReport.results);
+  })().catch((err) => {
+    console.error('Chapter 13 LangSmith trajectory evaluation failed:', err);
+    process.exit(1);
   });
-
-  console.log('=== LangSmith Trajectory Evaluation Report ===');
-  console.table(evalReport.results);
 }

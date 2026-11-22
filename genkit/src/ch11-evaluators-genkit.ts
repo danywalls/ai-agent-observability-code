@@ -7,16 +7,22 @@
  *      (`reasoning` BEFORE `passed`) to avoid the classic numeric-score trap.
  *
  * Run with Developer UI or CLI:
- *   export GEMINI_API_KEY=your_key
- *   npx tsx src/ch11-evaluators-genkit.ts
+ *   export GEMINI_API_KEY=your_key   # Optional: runs LLM-as-a-Judge live on the sample outputs
+ *   npm run ch11
  */
 import { genkit, z } from 'genkit';
 import { googleAI } from '@genkit-ai/google-genai';
 import { supportGoldenDataset } from './ch10-golden-dataset.js';
 
+try {
+  process.loadEnvFile?.();
+} catch {
+  // Optional .env file in genkit/
+}
+
 const ai = genkit({
   plugins: [googleAI()],
-  model: googleAI.model('gemini-2.5-flash'),
+  model: googleAI.model('gemini-3-flash-preview'),
 });
 
 // ---------------------------------------------------------------------------
@@ -56,7 +62,7 @@ export const mustMentionFactsEvaluator = ai.defineEvaluator(
 // 2. LLM-as-a-Judge Evaluator (Structured Chain-of-Thought + Binary Pass/Fail)
 // ---------------------------------------------------------------------------
 const JudgeRubricSchema = z.object({
-  // ⚠️ Best practice: always ask for step-by-step reasoning BEFORE the boolean verdict!
+  // Best practice: always ask for step-by-step reasoning BEFORE the boolean verdict!
   reasoning: z
     .string()
     .describe('Brief explanation comparing the agent output against the reference facts and policy.'),
@@ -74,7 +80,7 @@ export const semanticCorrectnessEvaluator = ai.defineEvaluator(
   },
   async (datapoint) => {
     const { output } = await ai.generate({
-      model: googleAI.model('gemini-2.5-flash'),
+      model: googleAI.model('gemini-3-flash-preview'),
       config: { temperature: 0 }, // Always set temperature=0 on LLM judges!
       output: { schema: JudgeRubricSchema },
       prompt:
@@ -99,27 +105,46 @@ export const semanticCorrectnessEvaluator = ai.defineEvaluator(
   },
 );
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  // Run the deterministic code evaluator locally against two sample outputs
-  const sampleEvalDataset = [
-    {
-      ...supportGoldenDataset[0],
-      output: 'Your order A-1001 was shipped on Nov 10 and the total is $59.90.',
-    },
-    {
-      ...supportGoldenDataset[1],
-      // Contradictory VIP output from Chapter 3!
-      output: 'You are VIP (90 days), but our system says order A-1002 is not eligible.',
-    },
-  ];
+if (import.meta.url === `file://${process.argv[1]}` && process.env.GENKIT_ENV !== 'dev') {
+  void (async () => {
+    // Run the deterministic code evaluator locally against two sample outputs
+    const sampleEvalDataset = [
+      {
+        ...supportGoldenDataset[0],
+        output: 'Your order A-1001 was shipped on Nov 10 and the total is $59.90.',
+      },
+      {
+        ...supportGoldenDataset[1],
+        // Contradictory VIP output from Chapter 3!
+        output: 'You are VIP (90 days), but our system says order A-1002 is not eligible.',
+      },
+    ];
 
-  const evalResults = await ai.evaluate({
-    evaluator: mustMentionFactsEvaluator,
-    dataset: sampleEvalDataset,
+    const evalResults = await ai.evaluate({
+      evaluator: mustMentionFactsEvaluator,
+      dataset: sampleEvalDataset,
+    });
+
+    console.log('=== Genkit Deterministic Evaluator Results ===');
+    for (const row of evalResults) {
+      console.log(row.testCaseId, '->', row.evaluation);
+    }
+
+    if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
+      const judgeResults = await ai.evaluate({
+        evaluator: semanticCorrectnessEvaluator,
+        dataset: sampleEvalDataset,
+      });
+
+      console.log('\n=== Genkit LLM-as-a-Judge Evaluator Results ===');
+      for (const row of judgeResults) {
+        console.log(row.testCaseId, '->', row.evaluation);
+      }
+    } else {
+      console.log('\n(Tip: Set GEMINI_API_KEY to also run semanticCorrectnessEvaluator live.)');
+    }
+  })().catch((err) => {
+    console.error('Chapter 11 Genkit evaluation failed:', err);
+    process.exit(1);
   });
-
-  console.log('=== Genkit Deterministic Evaluator Results ===');
-  for (const row of evalResults) {
-    console.log(row.testCaseId, '->', row.evaluation);
-  }
 }

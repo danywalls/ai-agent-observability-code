@@ -1,6 +1,13 @@
+import { awaitAllCallbacks } from '@langchain/core/callbacks/promises';
 import { traceable } from 'langsmith/traceable';
 
-interface EvalCaseResult {
+try {
+  process.loadEnvFile?.();
+} catch {
+  // Optional .env file in langchain/
+}
+
+export interface EvalCaseResult {
   id: string;
   baselineScore: number;
   candidateScore: number;
@@ -8,28 +15,28 @@ interface EvalCaseResult {
   costUsd: number;
 }
 
-interface GateThresholds {
+export interface GateThresholds {
   minAvgQuality: number;
   maxRegressionPerExample: number;
   maxP95LatencyMs: number;
   maxAvgCostUsd: number;
 }
 
-const THRESHOLDS: GateThresholds = {
+export const THRESHOLDS: GateThresholds = {
   minAvgQuality: 0.85,
   maxRegressionPerExample: 0.15,
   maxP95LatencyMs: 2500,
   maxAvgCostUsd: 0.012,
 };
 
-function percentile95(values: number[]): number {
+export function percentile95(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const idx = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1);
   return sorted[idx];
 }
 
-const runCandidateEvaluation = traceable(
+export const runCandidateEvaluation = traceable(
   async (promptVersion: string): Promise<EvalCaseResult[]> => {
     // Simulated deterministic evaluation dataset aligned with Chapter 12 CI/CD gate
     const baseCases: EvalCaseResult[] = [
@@ -47,10 +54,10 @@ const runCandidateEvaluation = traceable(
 
     return baseCases;
   },
-  { name: 'ci_eval_gate_runner', run_type: 'chain' }
+  { name: 'ci_eval_gate_runner', run_type: 'chain' },
 );
 
-async function main() {
+export async function main() {
   const promptVersion = process.env.PROMPT_VERSION ?? 'v2';
   const results = await runCandidateEvaluation(promptVersion);
 
@@ -59,7 +66,7 @@ async function main() {
   const p95LatencyMs = percentile95(results.map((r) => r.latencyMs));
   const avgCostUsd = results.reduce((sum, r) => sum + r.costUsd, 0) / results.length;
   const regressions = results.filter(
-    (r) => r.baselineScore - r.candidateScore > THRESHOLDS.maxRegressionPerExample
+    (r) => r.baselineScore - r.candidateScore > THRESHOLDS.maxRegressionPerExample,
   );
 
   const passed =
@@ -80,6 +87,7 @@ async function main() {
   ];
 
   console.log(summaryLines.join('\n'));
+  await awaitAllCallbacks();
 
   if (!passed) {
     console.error('\nGate failed: regression or budget breach detected.');
@@ -87,7 +95,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void main().catch((err) => {
+    console.error('Chapter 12 CI gate failed:', err);
+    process.exit(1);
+  });
+}

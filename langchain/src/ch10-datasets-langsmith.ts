@@ -2,18 +2,23 @@
  * Chapter 10: "'It Seems to Work' Is Not a Metric: Datasets" (LangSmith SDK version)
  *
  * Demonstrates the LangChain Academy "Datasets" module in TypeScript:
- *   1. Creating a versioned dataset in LangSmith (`client.createDataset`) with
- *      explicit JSON schemas for inputs and outputs.
+ *   1. Creating a versioned dataset in LangSmith (`client.createDataset`) idempotently.
  *   2. Adding examples (`client.createExamples`) from three sources:
  *        - Manually curated golden examples
  *        - Production traces (`source_run_id`)
  *        - Synthetic / edge-case examples assigned to specific `splits` (`smoke`, `regression`)
- *   3. Listing examples by split (`client.listExamples({ datasetName, splits: ['regression'] })`).
+ *   3. Listing examples without duplicating rows across repeated runs.
  *
  * Run in dry-run mode (no API key needed) or live against LangSmith:
- *   npx tsx src/ch10-datasets-langsmith.ts
+ *   npm run ch10
  */
 import { Client } from 'langsmith';
+
+try {
+  process.loadEnvFile?.();
+} catch {
+  // Optional .env file in langchain/
+}
 
 export interface DatasetSeedRow {
   id: string;
@@ -96,36 +101,54 @@ export async function syncSupportDatasetToLangSmith(datasetName = 'store-support
       dataType: 'kv',
     }));
 
-  // 2. Upload examples with splits and source metadata
-  await client.createExamples(
-    INITIAL_DATASET_ROWS.map((row) => ({
-      dataset_id: dataset.id,
-      inputs: row.inputs,
-      outputs: row.outputs,
-      split: row.split,
-      metadata: { source: row.source },
-    })),
-  );
+  // 2. Upload examples idempotently only if the dataset is empty
+  const existingExamples = [];
+  for await (const ex of client.listExamples({ datasetId: dataset.id, limit: 1 })) {
+    existingExamples.push(ex);
+  }
 
-  return dataset;
+  let createdExamplesCount = 0;
+  if (existingExamples.length === 0) {
+    await client.createExamples(
+      INITIAL_DATASET_ROWS.map((row) => ({
+        dataset_id: dataset.id,
+        inputs: row.inputs,
+        outputs: row.outputs,
+        split: row.split,
+        metadata: { source: row.source },
+      })),
+    );
+    createdExamplesCount = INITIAL_DATASET_ROWS.length;
+  }
+
+  return { dataset, createdExamplesCount };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  console.log('=== Golden Dataset Structure (Inputs, Reference Outputs & Splits) ===');
-  console.table(
-    INITIAL_DATASET_ROWS.map((r) => ({
-      id: r.id,
-      split: r.split,
-      source: r.source,
-      question: r.inputs.question.slice(0, 42) + (r.inputs.question.length > 42 ? '...' : ''),
-      expectedTools: r.outputs.expectedToolsCalled.join(', '),
-    })),
-  );
+  void (async () => {
+    console.log('=== Golden Dataset Structure (Inputs, Reference Outputs & Splits) ===');
+    console.table(
+      INITIAL_DATASET_ROWS.map((r) => ({
+        id: r.id,
+        split: r.split,
+        source: r.source,
+        question: r.inputs.question.slice(0, 42) + (r.inputs.question.length > 42 ? '...' : ''),
+        expectedTools: r.outputs.expectedToolsCalled.join(', '),
+      })),
+    );
 
-  if (process.env.LANGSMITH_API_KEY) {
-    const ds = await syncSupportDatasetToLangSmith();
-    console.log(`Synced dataset "${ds.name}" (${ds.id}) to LangSmith.`);
-  } else {
-    console.log('\n(Tip: Set LANGSMITH_API_KEY to upload these examples to LangSmith live.)');
-  }
+    if (process.env.LANGSMITH_API_KEY) {
+      const { dataset, createdExamplesCount } = await syncSupportDatasetToLangSmith();
+      if (createdExamplesCount > 0) {
+        console.log(`Synced dataset "${dataset.name}" (${dataset.id}) with ${createdExamplesCount} new examples.`);
+      } else {
+        console.log(`Dataset "${dataset.name}" (${dataset.id}) already populated in LangSmith (no duplicates added).`);
+      }
+    } else {
+      console.log('\n(Tip: Set LANGSMITH_API_KEY to upload these examples to LangSmith live.)');
+    }
+  })().catch((err) => {
+    console.error('Chapter 10 execution failed:', err);
+    process.exit(1);
+  });
 }
