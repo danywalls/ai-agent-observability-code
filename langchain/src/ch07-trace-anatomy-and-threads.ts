@@ -12,15 +12,23 @@
  * Also demonstrates grouping multi-turn conversations into a single **Thread**
  * using `thread_id` (or `session_id` / `conversation_id`) inside `metadata`.
  *
- * Run:
- *   export GOOGLE_API_KEY=your_gemini_key
+ * Run locally without any API keys (simulated LLM step), or add LangSmith env vars
+ * to inspect all 6 run types and the Threads tab in the cloud:
  *   export LANGSMITH_TRACING=true
  *   export LANGSMITH_API_KEY=your_langsmith_key
- *   npx tsx src/ch07-trace-anatomy-and-threads.ts
+ *   export LANGSMITH_PROJECT=support-agent-dev
+ *   npm run ch07
  */
+import { awaitAllCallbacks } from '@langchain/core/callbacks/promises';
 import { BaseMessage, HumanMessage, AIMessage } from '@langchain/core/messages';
 import { getCurrentRunTree, traceable } from 'langsmith/traceable';
 import { z } from 'zod';
+
+try {
+  process.loadEnvFile?.();
+} catch {
+  // Optional .env file in langchain/
+}
 
 // Simple in-memory thread store so Turn 2 remembers Turn 1
 const threadHistoryStore = new Map<string, BaseMessage[]>();
@@ -70,11 +78,22 @@ export const callLanguageModel = traceable(
     messages: { role: string; content: string }[];
     orderContext?: { status: string; item: string; total: number };
   }) => {
+    const lastUserMessage = input.messages.at(-1)?.content.toLowerCase() ?? '';
+    const asksAboutPrice =
+      lastUserMessage.includes('how much') ||
+      lastUserMessage.includes('pay') ||
+      lastUserMessage.includes('cost') ||
+      lastUserMessage.includes('price');
+
     // Simulated raw JSON string returned by the model so the example can run even offline
+    const replyText = !input.orderContext
+      ? 'Please share your order ID so I can check it.'
+      : asksAboutPrice
+        ? `You paid $${input.orderContext.total.toFixed(2)} for your ${input.orderContext.item} order.`
+        : `Your order for ${input.orderContext.item} ($${input.orderContext.total.toFixed(2)}) is ${input.orderContext.status}.`;
+
     const rawJsonText = JSON.stringify({
-      reply: input.orderContext
-        ? `Your order for ${input.orderContext.item} ($${input.orderContext.total}) is ${input.orderContext.status}.`
-        : 'Please share your order ID so I can check it.',
+      reply: replyText,
       intent: 'order_status',
       requiresHumanEscalation: false,
     });
@@ -94,7 +113,7 @@ export const callLanguageModel = traceable(
     run_type: 'llm',
     metadata: {
       ls_provider: 'google_genai',
-      ls_model_name: 'gemini-2.5-flash',
+      ls_model_name: 'gemini-3-flash-preview',
       ls_model_type: 'chat',
     },
   },
@@ -178,23 +197,31 @@ export const handleConversationTurn = traceable(
 );
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const sharedThreadId = 'thread-frank-001';
+  void (async () => {
+    const sharedThreadId = 'thread-frank-001';
 
-  // Turn 1
-  const turn1 = await handleConversationTurn({
-    threadId: sharedThreadId,
-    userId: 'usr_frank',
-    customerTier: 'vip',
-    message: 'Hi! Can you check my order A-1003?',
-  });
-  console.log('Turn 1:', turn1);
+    // Turn 1
+    const turn1 = await handleConversationTurn({
+      threadId: sharedThreadId,
+      userId: 'usr_frank',
+      customerTier: 'vip',
+      message: 'Hi! Can you check my order A-1003?',
+    });
+    console.log('Turn 1:', turn1);
 
-  // Turn 2 (same threadId -> grouped into the same Thread in LangSmith!)
-  const turn2 = await handleConversationTurn({
-    threadId: sharedThreadId,
-    userId: 'usr_frank',
-    customerTier: 'vip',
-    message: 'And how much did I pay for that order?',
+    // Turn 2 (same threadId -> grouped into the same Thread in LangSmith!)
+    const turn2 = await handleConversationTurn({
+      threadId: sharedThreadId,
+      userId: 'usr_frank',
+      customerTier: 'vip',
+      message: 'And how much did I pay for that order?',
+    });
+    console.log('Turn 2:', turn2);
+
+    // Flush batched LangSmith runs before the CLI process exits
+    await awaitAllCallbacks();
+  })().catch((err) => {
+    console.error('Chapter 7 execution failed:', err);
+    process.exit(1);
   });
-  console.log('Turn 2:', turn2);
 }

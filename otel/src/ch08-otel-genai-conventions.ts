@@ -4,9 +4,9 @@
  * Shows:
  *   1. How an AI agent trace is represented using standard OpenTelemetry GenAI
  *      Semantic Conventions (`gen_ai.*`):
- *        - `invoke_agent supportAgent` (root agent span)
- *        - `chat gemini-2.5-flash`     (LLM client span with token usage)
- *        - `execute_tool getOrder`     (tool execution span)
+ *        - `invoke_agent supportAgent`    (root agent span)
+ *        - `chat gemini-3-flash-preview`  (LLM client span with token usage)
+ *        - `execute_tool getOrder`        (tool execution span)
  *   2. How the privacy opt-in works (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`):
  *      recording message events ONLY when explicitly enabled.
  *   3. How an OpenTelemetry Collector / enterprise platform (such as Progress Observability
@@ -14,19 +14,20 @@
  *      and enriches them with USD cost and user attribution.
  *
  * Run locally (prints the standard GenAI spans + simulated Collector enrichment):
- *   npx tsx src/ch08-otel-genai-conventions.ts
+ *   npm run ch08
+ *   OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true npm run ch08
  */
 import { trace, SpanStatusCode } from '@opentelemetry/api';
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { BatchSpanProcessor, type ReadableSpan, type SpanProcessor } from '@opentelemetry/sdk-trace';
 
 // ---------------------------------------------------------------------------
 // 1. Simulated Collector Enricher (illustrates how platforms like Progress
 //    Observability Platform or LangSmith enrich incoming OTel GenAI spans)
 // ---------------------------------------------------------------------------
 const MODEL_RATES_PER_1M: Record<string, { input: number; output: number }> = {
-  'gemini-2.5-flash': { input: 0.3, output: 2.5 },
+  'gemini-3-flash-preview': { input: 0.3, output: 2.5 },
 };
 
 class CollectorCostEnricherProcessor implements SpanProcessor {
@@ -46,9 +47,17 @@ class CollectorCostEnricherProcessor implements SpanProcessor {
       costSummary = ` | tokens=${inTokens}->${outTokens} | enrichedCost=$${costUsd.toFixed(6)}`;
     }
 
+    const eventNames = span.events.map((e) => e.name);
+    const eventsSummary =
+      eventNames.length > 0
+        ? ` | events=${eventNames.join(',')}`
+        : operation === 'invoke_agent'
+          ? ''
+          : ' | events=none (privacy default)';
+
     const parent = span.parentSpanContext?.spanId ? ` (parent=${span.parentSpanContext.spanId.slice(0, 8)})` : ' (root)';
     console.log(
-      `[OTel Span] ${span.name}${parent} | op=${operation}${costSummary}`,
+      `[OTel Span] ${span.name}${parent} | op=${operation}${costSummary}${eventsSummary}`,
     );
   }
 
@@ -57,13 +66,15 @@ class CollectorCostEnricherProcessor implements SpanProcessor {
 }
 
 // In production, if OTEL_EXPORTER_OTLP_ENDPOINT is set (e.g., to Progress Observability
-// Collector, LangSmith OTLP endpoint, or Genkit Monitoring), OTLPTraceExporter sends spans there.
+// Collector, LangSmith OTLP endpoint, or Genkit Monitoring), add a BatchSpanProcessor with OTLPTraceExporter.
+const spanProcessors: SpanProcessor[] = [new CollectorCostEnricherProcessor()];
+if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+  spanProcessors.push(new BatchSpanProcessor({ exporter: new OTLPTraceExporter() }));
+}
+
 const sdk = new NodeSDK({
   serviceName: 'store-support-agent',
-  spanProcessors: [
-    new CollectorCostEnricherProcessor(),
-  ],
-  traceExporter: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ? new OTLPTraceExporter() : undefined,
+  spanProcessors,
 });
 
 sdk.start();
@@ -93,12 +104,12 @@ export async function runOtelInstrumentedAgent(input: {
 
     try {
       // Tier 2: First LLM Call (`chat {gen_ai.request.model}`) -> decides to call getOrder
-      await tracer.startActiveSpan('chat gemini-2.5-flash', async (llmSpan1) => {
+      await tracer.startActiveSpan('chat gemini-3-flash-preview', async (llmSpan1) => {
         llmSpan1.setAttributes({
           'gen_ai.operation.name': 'chat',
           'gen_ai.system': 'google_genai',
-          'gen_ai.request.model': 'gemini-2.5-flash',
-          'gen_ai.response.model': 'gemini-2.5-flash-001',
+          'gen_ai.request.model': 'gemini-3-flash-preview',
+          'gen_ai.response.model': 'gemini-3-flash-preview',
           'gen_ai.usage.input_tokens': 420,
           'gen_ai.usage.output_tokens': 35,
           'gen_ai.response.finish_reasons': ['tool_calls'],
@@ -126,12 +137,12 @@ export async function runOtelInstrumentedAgent(input: {
       });
 
       // Tier 2: Second LLM Call (`chat {gen_ai.request.model}`) -> writes final answer
-      const finalReply = await tracer.startActiveSpan('chat gemini-2.5-flash', async (llmSpan2) => {
+      const finalReply = await tracer.startActiveSpan('chat gemini-3-flash-preview', async (llmSpan2) => {
         llmSpan2.setAttributes({
           'gen_ai.operation.name': 'chat',
           'gen_ai.system': 'google_genai',
-          'gen_ai.request.model': 'gemini-2.5-flash',
-          'gen_ai.response.model': 'gemini-2.5-flash-001',
+          'gen_ai.request.model': 'gemini-3-flash-preview',
+          'gen_ai.response.model': 'gemini-3-flash-preview',
           'gen_ai.usage.input_tokens': 510,
           'gen_ai.usage.output_tokens': 48,
           'gen_ai.response.finish_reasons': ['stop'],
@@ -154,11 +165,16 @@ export async function runOtelInstrumentedAgent(input: {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const reply = await runOtelInstrumentedAgent({
-    userId: 'usr_laura_42',
-    sessionId: 'sess_9001',
-    question: 'Where is my order A-1001?',
+  void (async () => {
+    const reply = await runOtelInstrumentedAgent({
+      userId: 'usr_laura_42',
+      sessionId: 'sess_9001',
+      question: 'Where is my order A-1001?',
+    });
+    console.log('\nFinal agent reply:', reply);
+    await sdk.shutdown();
+  })().catch((err) => {
+    console.error('Chapter 8 execution failed:', err);
+    process.exit(1);
   });
-  console.log('\nFinal agent reply:', reply);
-  await sdk.shutdown();
 }

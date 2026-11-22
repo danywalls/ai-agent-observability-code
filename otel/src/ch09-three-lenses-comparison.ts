@@ -12,7 +12,7 @@
  *      enriched by the Collector with USD cost and customer attribution)
  *
  * Run:
- *   npx tsx src/ch09-three-lenses-comparison.ts
+ *   npm run ch09
  */
 import { trace, SpanStatusCode } from '@opentelemetry/api';
 import { NodeSDK } from '@opentelemetry/sdk-node';
@@ -40,7 +40,7 @@ export function executePromoTool(orderId: string, code: string) {
   return { applied: true, orderId, discountPercent: discount * 100 };
 }
 
-// Collector processor that prints the side-by-side comparison table for any captured OTel span
+// Collector processor that records the real OTel spans (including logical tool ERROR status)
 const capturedOtelSpans: Array<{
   name: string;
   op: string;
@@ -72,6 +72,7 @@ sdk.start();
 const tracer = trace.getTracer('support-agent-three-lenses', '1.0.0');
 
 export async function runScenarioAcrossThreeLenses(scenario: PromoScenarioInput) {
+  capturedOtelSpans.length = 0;
   let toolOutput: ReturnType<typeof executePromoTool> | undefined;
 
   await tracer.startActiveSpan('invoke_agent supportAgent', async (agentSpan) => {
@@ -84,10 +85,10 @@ export async function runScenarioAcrossThreeLenses(scenario: PromoScenarioInput)
     });
 
     // Step 1: First LLM call decides to invoke applyPromoCode
-    await tracer.startActiveSpan('chat gemini-2.5-flash', async (llm1) => {
+    await tracer.startActiveSpan('chat gemini-3-flash-preview', async (llm1) => {
       llm1.setAttributes({
         'gen_ai.operation.name': 'chat',
-        'gen_ai.request.model': 'gemini-2.5-flash',
+        'gen_ai.request.model': 'gemini-3-flash-preview',
         'gen_ai.usage.input_tokens': 310,
         'gen_ai.usage.output_tokens': 28,
       });
@@ -109,10 +110,10 @@ export async function runScenarioAcrossThreeLenses(scenario: PromoScenarioInput)
     });
 
     // Step 3: Second LLM call explains the result to the user
-    await tracer.startActiveSpan('chat gemini-2.5-flash', async (llm2) => {
+    await tracer.startActiveSpan('chat gemini-3-flash-preview', async (llm2) => {
       llm2.setAttributes({
         'gen_ai.operation.name': 'chat',
-        'gen_ai.request.model': 'gemini-2.5-flash',
+        'gen_ai.request.model': 'gemini-3-flash-preview',
         'gen_ai.usage.input_tokens': 390,
         'gen_ai.usage.output_tokens': 45,
       });
@@ -125,6 +126,7 @@ export async function runScenarioAcrossThreeLenses(scenario: PromoScenarioInput)
   return {
     scenario,
     toolOutput,
+    capturedOtelSpans: [...capturedOtelSpans],
     lenses: [
       {
         step: '1. Root Agent',
@@ -134,9 +136,9 @@ export async function runScenarioAcrossThreeLenses(scenario: PromoScenarioInput)
       },
       {
         step: '2. LLM Call #1',
-        genkitView: 'model: googleai/gemini-2.5-flash (310 -> 28 tok)',
+        genkitView: 'model: googleai/gemini-3-flash-preview (310 -> 28 tok)',
         langsmithView: 'llm: ChatGoogleGenerativeAI (310 -> 28 tok)',
-        otelProgressView: 'chat gemini-2.5-flash (enriched cost: $0.000163)',
+        otelProgressView: 'chat gemini-3-flash-preview (enriched cost: $0.000163)',
       },
       {
         step: '3. Tool Call',
@@ -146,26 +148,33 @@ export async function runScenarioAcrossThreeLenses(scenario: PromoScenarioInput)
       },
       {
         step: '4. LLM Call #2',
-        genkitView: 'model: googleai/gemini-2.5-flash (390 -> 45 tok)',
+        genkitView: 'model: googleai/gemini-3-flash-preview (390 -> 45 tok)',
         langsmithView: 'llm: ChatGoogleGenerativeAI (390 -> 45 tok)',
-        otelProgressView: 'chat gemini-2.5-flash (enriched cost: $0.000229)',
+        otelProgressView: 'chat gemini-3-flash-preview (enriched cost: $0.000229)',
       },
     ],
   };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const result = await runScenarioAcrossThreeLenses({
-    userId: 'usr_laura_42',
-    customerTier: 'vip',
-    threadId: 'thread_promo_99',
-    orderId: 'A-1001',
-    promoCodePassedByLlm: 'vip50 ',
-  });
+  void (async () => {
+    const result = await runScenarioAcrossThreeLenses({
+      userId: 'usr_laura_42',
+      customerTier: 'vip',
+      threadId: 'thread_promo_99',
+      orderId: 'A-1001',
+      promoCodePassedByLlm: 'vip50 ',
+    });
 
-  console.log('=== Tool Output Captured in All Three Lenses ===');
-  console.log(result.toolOutput);
-  console.log('\n=== How Each Step Appears Across the Three Lenses ===');
-  console.table(result.lenses);
-  await sdk.shutdown();
+    console.log('=== Tool Output Captured in All Three Lenses ===');
+    console.log(result.toolOutput);
+    console.log('\n=== Captured OpenTelemetry Spans (notice ERROR status on applyPromoCode) ===');
+    console.table(result.capturedOtelSpans);
+    console.log('\n=== How Each Step Appears Across the Three Lenses ===');
+    console.table(result.lenses);
+    await sdk.shutdown();
+  })().catch((err) => {
+    console.error('Chapter 9 execution failed:', err);
+    process.exit(1);
+  });
 }

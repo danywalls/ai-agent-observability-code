@@ -11,12 +11,22 @@
  *   - `tool`:      getOrderStatus
  *   - `output`:    Structured output validated by Zod (CustomerReplySchema)
  *
- * Run with Developer UI:
+ * Run with Developer UI (auto-loads `.env` on Node 20.12+):
  *   export GEMINI_API_KEY=your_key
  *   npx genkit start -- npx tsx --watch src/ch05-genkit-devtools-trace.ts
+ *
+ * Or run once directly in your terminal:
+ *   npm run ch05
  */
 import { genkit, z } from 'genkit';
 import { googleAI } from '@genkit-ai/google-genai';
+
+// Load local .env if present (Node 20.12+) without overriding exported shell variables
+try {
+  process.loadEnvFile?.();
+} catch {
+  // No .env file present; rely on exported environment variables
+}
 
 const ai = genkit({
   plugins: [googleAI()],
@@ -57,9 +67,13 @@ export const storePolicyRetriever = ai.defineSimpleRetriever(
   },
   async (query) => {
     const q = query.text.toLowerCase();
-    return policyKnowledgeBase.filter(
-      (doc) => doc.text.toLowerCase().includes(q) || q.includes(doc.category) || q.includes('return'),
-    );
+    const wantsReturns = q.includes('return') || q.includes('refund') || q.includes('damaged');
+    const wantsShipping = q.includes('ship') || q.includes('delivery time') || q.includes('transit');
+    return policyKnowledgeBase.filter((doc) => {
+      if (wantsReturns && doc.category === 'returns') return true;
+      if (wantsShipping && doc.category === 'shipping') return true;
+      return doc.text.toLowerCase().includes(q) || q.includes(doc.category);
+    });
   },
 );
 
@@ -68,7 +82,9 @@ export const getOrderStatus = ai.defineTool(
   {
     name: 'getOrderStatus',
     description: 'Looks up the current status, delivery date, and total of an order by ID (format A-XXXX).',
-    inputSchema: z.object({ orderId: z.string() }),
+    inputSchema: z.object({
+      orderId: z.string().describe('Order ID in format A-XXXX'),
+    }),
     outputSchema: z.object({
       found: z.boolean(),
       status: z.string().optional(),
@@ -122,7 +138,9 @@ export const supportPrompt = ai.definePrompt({
 export const observableSupportAgent = ai.defineFlow(
   {
     name: 'observableSupportAgent',
-    inputSchema: z.object({ question: z.string() }),
+    inputSchema: z.object({
+      question: z.string().describe('Customer support question'),
+    }),
     outputSchema: CustomerReplySchema,
   },
   async ({ question }) => {
@@ -150,3 +168,17 @@ export const observableSupportAgent = ai.defineFlow(
     return output;
   },
 );
+
+// Optional CLI runner when executed directly via `npm run ch05`
+// (skipped under `genkit start`, which sets GENKIT_ENV=dev)
+if (import.meta.url === `file://${process.argv[1]}` && process.env.GENKIT_ENV !== 'dev') {
+  void (async () => {
+    const output = await observableSupportAgent({
+      question: 'My order A-1003 arrived damaged 40 days ago. Can I still return it?',
+    });
+    console.log('\n[Structured output]\n', JSON.stringify(output, null, 2));
+  })().catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  });
+}
